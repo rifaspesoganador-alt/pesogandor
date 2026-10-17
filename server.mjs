@@ -9,6 +9,9 @@ if(production&&(!origin.startsWith('https://')||!process.env.ADMIN_PASSWORD||pro
 mkdirSync('data',{recursive:true});
 const db=new DatabaseSync('data/peso.db');
 db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS reservations(id TEXT PRIMARY KEY,name TEXT,phone TEXT,numbers TEXT,status TEXT,created INTEGER,expires INTEGER); CREATE TABLE IF NOT EXISTS tickets(number INTEGER PRIMARY KEY,reservation TEXT);`);
+if(!db.prepare('PRAGMA table_info(reservations)').all().some(column=>column.name==='email'))db.exec('ALTER TABLE reservations ADD COLUMN email TEXT');
+const normalizeName=value=>value.normalize('NFKC').trim().replace(/\s+/gu,' ').toLocaleLowerCase('es');
+const validEmail=value=>typeof value==='string'&&value.length<=254&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 db.exec('CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY,count INTEGER,until INTEGER); CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,event TEXT,reservation TEXT,created INTEGER);');
 const sessions=new Map();
 const salt=randomBytes(32), password=process.env.ADMIN_PASSWORD;
@@ -44,15 +47,26 @@ if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')ret
 }
 expire();
 if(path==='/api/raffle'&&req.method==='GET')return send(res,200,{title:'Tu próximo premio empieza aquí',price,count,demo:true,taken:db.prepare('SELECT number FROM tickets').all().map(x=>x.number)});
+if(path==='/api/tickets/lookup'&&req.method==='POST'){
+limit('ticket_lookup',30,60000);
+const b=await body(req);
+if(!['name','phone','email'].includes(b.method)||typeof b.value!=='string'||!b.value.trim()||b.value.length>254||typeof b.folio!=='string'||!/^[a-f0-9]{24}$/i.test(b.folio.trim()))return send(res,400,{error:'Selecciona un dato de registro e introduce tu folio de 24 caracteres.'});
+const row=db.prepare('SELECT id,name,phone,email,numbers,status,created,expires FROM reservations WHERE id=?').get(b.folio.trim().toLowerCase());
+const matches=row&&(b.method==='name'?normalizeName(row.name)===normalizeName(b.value):b.method==='phone'?row.phone===b.value.trim():row.email&&row.email===b.value.trim().toLowerCase());
+if(!matches)return send(res,404,{error:'No encontramos una coincidencia con esos datos y folio. Revisa ambos e intenta de nuevo.'});
+return send(res,200,{folio:row.id,numbers:JSON.parse(row.numbers),status:row.status,created:row.created,expires:row.expires,demo:true});
+}
 if(path==='/api/reservations'&&req.method==='POST'){
 limit('reservations',30,60000);
 const b=await body(req);if(!Array.isArray(b.numbers)||b.numbers.length>10)return send(res,400,{error:'Selecciona de 1 a 10 boletos'});const nums=[...new Set(b.numbers)];
 if(typeof b.name!=='string'||b.name.trim().length<3||b.name.length>100||typeof b.phone!=='string'||!/^\d{10}$/.test(b.phone)||!nums.length||nums.length>10||nums.some(n=>!Number.isInteger(n)||n<0||n>=count))return send(res,400,{error:'Revisa nombre, teléfono y boletos (máximo 10).'});
+const email=b.email==null||b.email===''?null:typeof b.email==='string'?b.email.trim().toLowerCase():b.email;
+if(email!==null&&!validEmail(email))return send(res,400,{error:'Revisa el correo electrónico.'});
 const id=randomBytes(12).toString('hex');db.exec('BEGIN IMMEDIATE');
 try{
 const active=db.prepare("SELECT numbers FROM reservations WHERE phone=? AND status='pending'").all(b.phone).reduce((sum,row)=>sum+JSON.parse(row.numbers).length,0);
 if(active+nums.length>10){db.exec('ROLLBACK');return send(res,429,{error:'Este teléfono ya tiene el máximo de boletos pendientes'});}
-db.prepare('INSERT INTO reservations VALUES(?,?,?,?,?,?,?)').run(id,b.name.trim(),b.phone,JSON.stringify(nums),'pending',Date.now(),Date.now()+3600000);for(const n of nums)db.prepare('INSERT INTO tickets VALUES(?,?)').run(n,id);db.exec('COMMIT');}catch{db.exec('ROLLBACK');return send(res,409,{error:'Algún boleto acaba de ser apartado. Actualiza tu selección.'});}
+db.prepare('INSERT INTO reservations(id,name,phone,numbers,status,created,expires,email) VALUES(?,?,?,?,?,?,?,?)').run(id,b.name.trim(),b.phone,JSON.stringify(nums),'pending',Date.now(),Date.now()+3600000,email);for(const n of nums)db.prepare('INSERT INTO tickets VALUES(?,?)').run(n,id);db.exec('COMMIT');}catch{db.exec('ROLLBACK');return send(res,409,{error:'Algún boleto acaba de ser apartado. Actualiza tu selección.'});}
 return send(res,201,{id,total:nums.length*price,message:'Apartado de demostración por 60 minutos. No realices pagos.'});
 }
 if(path==='/api/login'&&req.method==='POST'){

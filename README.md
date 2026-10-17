@@ -19,3 +19,9 @@ Repositorio: https://github.com/rifaspesoganador-alt/pesogandor. Se esperan arch
 En una carpeta nueva del servidor, clone este repositorio, cree un archivo `.env` privado con `ADMIN_PASSWORD` y ejecute `docker compose up -d --build`. No comparta el archivo `.env`. El contenedor escucha en `0.0.0.0` dentro de Docker; fuera de Docker, el servidor mantiene `127.0.0.1` por defecto (`HOST` permite configurarlo).
 
 La base de datos del servidor se crea en el volumen `peso-ganador_peso_data`; no se importa la base local. Para actualizar: `git pull --ff-only` y `docker compose up -d --build`. Nunca use `docker compose down -v` si necesita conservar los datos. Configure respaldos antes de operar con datos reales.
+
+## Consulta de boletos
+
+La sección «Mis boletos» usa POST `/api/tickets/lookup`. Requiere el folio aleatorio de 24 caracteres y una coincidencia exacta de teléfono, correo o nombre completo (sin distinguir mayúsculas ni espacios repetidos). Solo devuelve ese apartado: números, estado y fechas, sin datos personales. No ofrece búsqueda pública de clientes ni todos los apartados asociados a un contacto. Los intentos se limitan globalmente a 30 por minuto.
+
+El correo es opcional al reservar y se incorpora con una migración aditiva de SQLite al arrancar; no borra registros previos. Los apartados anteriores se consultan por nombre o teléfono. El folio es confidencial: quien conoce el folio y un dato coincidente puede consultar el apartado. La recuperación sin folio queda a cargo de administración; no se implementa envío de códigos por SMS o correo. La consulta conserva la etiqueta de demostración y distingue pagado, pendiente y vencido.
