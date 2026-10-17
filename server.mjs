@@ -90,7 +90,7 @@ if(path==='/api/admin/logout'&&req.method==='POST'){sessions.delete(token(req));
 if(path==='/api/admin/reservations'&&req.method==='GET')return send(res,200,db.prepare('SELECT * FROM reservations ORDER BY created DESC LIMIT 500').all());
 if(path==='/api/admin/confirm'&&req.method==='POST'){const b=await body(req);if(typeof b.id!=='string'||!/^[a-f0-9]{24}$/.test(b.id))return send(res,400,{error:'Folio inválido'});db.exec('BEGIN IMMEDIATE');try{const result=db.prepare("UPDATE reservations SET status='paid' WHERE id=? AND status='pending' AND expires>=?").run(b.id,Date.now());if(result.changes)audit('payment_confirmed',b.id);db.exec('COMMIT');return send(res,result.changes?200:409,{ok:!!result.changes});}catch(error){db.exec('ROLLBACK');throw error;}}
 }
-const files={'/':'index.html','/CFAD':'admin.html','/CFAD/':'admin.html','/app.js':'app.js','/admin.js':'admin.js','/style.css':'style.css'};
+const files={'/':'index.html','/CFAD':'admin.html','/CFAD/':'admin.html','/app.js':'app.js','/admin.js':'admin.js','/style.css':'style.css','/admin.css':'admin.css'};
 if(['GET','HEAD'].includes(req.method)&&Object.hasOwn(files,path)){res.setHeader('Content-Type',path.endsWith('.js')?'text/javascript; charset=utf-8':path.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8');return res.end(req.method==='HEAD'?undefined:readFileSync(new URL(`public/${files[path]}`,import.meta.url)));}
 send(res,404,{error:'No encontrado'});
 }catch(error){if(error.retry)res.setHeader('Retry-After',String(error.retry));if(!error.status)console.error('request_failed');send(res,error.status||500,{error:error.status?error.message:'Error interno'});}
