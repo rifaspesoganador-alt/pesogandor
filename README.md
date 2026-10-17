@@ -25,3 +25,9 @@ La base de datos del servidor se crea en el volumen `peso-ganador_peso_data`; no
 La sección «Mis boletos» usa POST `/api/tickets/lookup`. Requiere el folio aleatorio de 24 caracteres y una coincidencia exacta de teléfono, correo o nombre completo (sin distinguir mayúsculas ni espacios repetidos). Solo devuelve ese apartado: números, estado y fechas, sin datos personales. No ofrece búsqueda pública de clientes ni todos los apartados asociados a un contacto. Los intentos se limitan globalmente a 30 por minuto.
 
 El correo es opcional al reservar y se incorpora con una migración aditiva de SQLite al arrancar; no borra registros previos. Los apartados anteriores se consultan por nombre o teléfono. El folio es confidencial: quien conoce el folio y un dato coincidente puede consultar el apartado. La recuperación sin folio queda a cargo de administración; no se implementa envío de códigos por SMS o correo. La consulta conserva la etiqueta de demostración y distingue pagado, pendiente y vencido.
+
+## Nueva rifa en administración
+
+CFAD permite crear borradores con premio, descripción, precio por boleto en MXN, cantidad de boletos y foto opcional JPG/PNG (máximo 1 MB, dimensiones máximas 4096 × 4096). Los importes se guardan como centavos enteros. Datos e imagen quedan en la tabla `raffles` de la misma SQLite persistente y las rutas de borradores y fotos requieren sesión administrativa. La migración agrega una tabla; no modifica los apartados previos.
+
+Guardar un borrador no publica ni cambia el sorteo de demostración. La publicación/activación y edición de estas nuevas rifas no forman parte de esta alta; requieren un flujo posterior que vincule boletos, reservas y reglas al sorteo correspondiente.

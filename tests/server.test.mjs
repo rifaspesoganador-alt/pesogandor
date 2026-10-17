@@ -97,3 +97,24 @@ if(batch===0){const r=await draw(10);const data=await r.json();assert.ok(data.nu
 const empty=await draw(1);assert.equal(empty.status,409);assert.equal((await empty.json()).available,0);
 }finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;rmSync(dir,{recursive:true,force:true});}
 });
+
+test('admin creates private raffle drafts with validated prices and photos',async()=>{
+const dir=mkdtempSync(join(tmpdir(),'peso-raffles-'));let proc;
+const base='http://localhost:3101';const env={...process.env,PORT:'3101',NODE_ENV:'test',PUBLIC_ORIGIN:base,ADMIN_PASSWORD:'raffle-test-only-password'};
+async function start(){proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env});await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});}
+async function stop(){if(proc&&proc.exitCode===null){const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;}}
+let cookie='';const post=(path,data,extra={})=>fetch(base+path,{method:'POST',headers:{Origin:base,'Content-Type':'application/json',Cookie:cookie,...extra},body:JSON.stringify(data)});
+const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1sAAAAASUVORK5CYII=';
+const input={prize:'Premio de ejemplo',description:'Descripción de prueba',price:'75.25',ticketCount:500,photo:{type:'image/png',base64:png}};
+try{await start();assert.equal((await post('/api/admin/raffles',input)).status,401);assert.equal((await fetch(base+'/api/admin/raffles')).status,401);
+async function login(){const r=await post('/api/login',{password:env.ADMIN_PASSWORD});assert.equal(r.status,200);cookie=r.headers.get('set-cookie').split(';')[0];}await login();
+assert.equal((await post('/api/admin/raffles',input,{Origin:'https://evil.example'})).status,403);
+const good=await post('/api/admin/raffles',input);assert.equal(good.status,201);const saved=await good.json();assert.equal(saved.status,'draft');
+const photoPath=`/api/admin/raffles/${saved.id}/photo`;assert.equal((await fetch(base+photoPath)).status,401);
+const photo=await fetch(base+photoPath,{headers:{Cookie:cookie}});assert.equal(photo.status,200);assert.equal(photo.headers.get('content-type'),'image/png');assert.deepEqual(Buffer.from(await photo.arrayBuffer()),Buffer.from(png,'base64'));
+for(const change of [{price:'0'},{price:'1.001'},{ticketCount:0},{ticketCount:1.5},{prize:'x'},{description:''},{photo:{type:'image/svg+xml',base64:Buffer.from('<svg/>').toString('base64')}},{photo:{type:'image/jpeg',base64:png}}])assert.equal((await post('/api/admin/raffles',{...input,...change})).status,400);
+const noPhoto=await post('/api/admin/raffles',{...input,photo:null});assert.equal(noPhoto.status,201);
+const publicRaffle=await (await fetch(base+'/api/raffle')).json();assert.equal(publicRaffle.price,50);assert.equal(publicRaffle.count,100);
+await stop();await start();cookie='';await login();const list=await (await fetch(base+'/api/admin/raffles',{headers:{Cookie:cookie}})).json();assert.equal(list.length,2);const draft=list.find(row=>row.id===saved.id);assert.equal(draft.price_cents,7525);assert.equal(draft.ticket_count,500);assert.equal(draft.has_photo,1);assert.equal(Object.hasOwn(draft,'photo'),false);
+}finally{await stop();rmSync(dir,{recursive:true,force:true});}
+});

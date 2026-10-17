@@ -13,6 +13,7 @@ if(!db.prepare('PRAGMA table_info(reservations)').all().some(column=>column.name
 const normalizeName=value=>value.normalize('NFKC').trim().replace(/\s+/gu,' ').toLocaleLowerCase('es');
 const validEmail=value=>typeof value==='string'&&value.length<=254&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 db.exec('CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY,count INTEGER,until INTEGER); CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,event TEXT,reservation TEXT,created INTEGER);');
+db.exec("CREATE TABLE IF NOT EXISTS raffles(id TEXT PRIMARY KEY,prize TEXT NOT NULL,description TEXT NOT NULL,price_cents INTEGER NOT NULL CHECK(price_cents>0),ticket_count INTEGER NOT NULL CHECK(ticket_count>0),status TEXT NOT NULL DEFAULT 'draft',photo BLOB,photo_type TEXT,created INTEGER NOT NULL);");
 const sessions=new Map();
 const salt=randomBytes(32), password=process.env.ADMIN_PASSWORD;
 const hash=password?scryptSync(password,salt,64):null;
@@ -20,12 +21,27 @@ const price=50,count=100;
 function send(res,status,value){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));}
 function expire(){const now=Date.now(); db.prepare("DELETE FROM tickets WHERE reservation IN (SELECT id FROM reservations WHERE status='pending' AND expires < ?)").run(now);db.prepare("UPDATE reservations SET status='expired' WHERE status='pending' AND expires < ?").run(now);}
 function problem(status,message){return Object.assign(Error(message),{status});}
-async function body(req){
+async function body(req,maxBytes=8192){
 if(!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type']||''))throw problem(415,'Se requiere application/json');
-if(Number(req.headers['content-length'])>8192)throw problem(413,'Solicitud demasiado grande');
-const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>8192)throw problem(413,'Solicitud demasiado grande');chunks.push(chunk);}
+if(Number(req.headers['content-length'])>maxBytes)throw problem(413,'Solicitud demasiado grande');
+const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>maxBytes)throw problem(413,'Solicitud demasiado grande');chunks.push(chunk);}
 let value;try{value=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw problem(400,'JSON inválido');}
 if(!value||typeof value!=='object'||Array.isArray(value))throw problem(400,'Se requiere un objeto JSON');return value;
+}
+function rafflePhoto(photo){
+if(photo==null)return {bytes:null,type:null};
+if(!photo||typeof photo!=='object'||!['image/png','image/jpeg'].includes(photo.type)||typeof photo.base64!=='string'||photo.base64.length>1398104||!/^[A-Za-z0-9+/]*={0,2}$/.test(photo.base64))throw problem(400,'Usa una foto JPG o PNG de máximo 1 MB.');
+const bytes=Buffer.from(photo.base64,'base64');let width=0,height=0;
+if(bytes.length<45||bytes.length>1048576||bytes.toString('base64')!==photo.base64)throw problem(400,'Usa una foto JPG o PNG de máximo 1 MB.');
+if(photo.type==='image/png'){
+if(bytes.subarray(0,8).toString('hex')!=='89504e470d0a1a0a'||bytes.toString('ascii',12,16)!=='IHDR'||bytes.readUInt32BE(8)!==13||bytes.toString('ascii',bytes.length-8,bytes.length-4)!=='IEND')throw problem(400,'La foto PNG no es válida.');
+width=bytes.readUInt32BE(16);height=bytes.readUInt32BE(20);
+}else{
+if(bytes[0]!==255||bytes[1]!==216||bytes[bytes.length-2]!==255||bytes[bytes.length-1]!==217)throw problem(400,'La foto JPG no es válida.');
+let offset=2;while(offset+4<bytes.length){if(bytes[offset]!==255)break;while(bytes[offset]===255)offset++;const marker=bytes[offset++];if(marker===218||marker===217)break;if(marker===1||marker>=208&&marker<=215)continue;const size=bytes.readUInt16BE(offset);if(size<2||offset+size>bytes.length)break;if([192,193,194].includes(marker)&&size>=8){height=bytes.readUInt16BE(offset+3);width=bytes.readUInt16BE(offset+5);break;}offset+=size;}
+}
+if(!width||!height||width>4096||height>4096)throw problem(400,'La foto debe medir como máximo 4096 × 4096 píxeles.');
+return {bytes,type:photo.type};
 }
 const cookieName=production?'__Host-session':'session';
 function token(req){return (req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith(cookieName+'='))?.slice(cookieName.length+1);}
@@ -86,6 +102,15 @@ sessions.clear();const sessionToken=randomBytes(32).toString('hex');sessions.set
 }
 if(path.startsWith('/api/admin/')){
 if(!admin(req))return send(res,401,{error:'Inicia sesión'});
+if(path==='/api/admin/raffles'&&req.method==='GET')return send(res,200,db.prepare("SELECT id,prize,description,price_cents,ticket_count,status,created,photo IS NOT NULL AS has_photo FROM raffles ORDER BY created DESC,id DESC LIMIT 100").all());
+if(path==='/api/admin/raffles'&&req.method==='POST'){
+limit('create_raffle',10,60000);const b=await body(req,1500000);
+if(typeof b.prize!=='string'||b.prize.trim().length<3||b.prize.length>120||typeof b.description!=='string'||!b.description.trim()||b.description.length>5000||typeof b.price!=='string'||!/^\d{1,7}(?:\.\d{1,2})?$/.test(b.price)||!Number.isInteger(b.ticketCount)||b.ticketCount<1||b.ticketCount>100000)return send(res,400,{error:'Revisa premio, descripción, precio y cantidad (1 a 100,000 boletos).'});
+const cents=Math.round(Number(b.price)*100);if(cents<1||cents>100000000)return send(res,400,{error:'El precio debe estar entre $0.01 y $1,000,000 MXN.'});
+const photo=rafflePhoto(b.photo),id=randomBytes(12).toString('hex');db.exec('BEGIN IMMEDIATE');try{db.prepare("INSERT INTO raffles(id,prize,description,price_cents,ticket_count,status,photo,photo_type,created) VALUES(?,?,?,?,?,'draft',?,?,?)").run(id,b.prize.trim(),b.description.trim(),cents,b.ticketCount,photo.bytes,photo.type,Date.now());audit('raffle_created',id);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}return send(res,201,{id,status:'draft',message:'Rifa guardada como borrador. La rifa pública no cambió.'});
+}
+const photoMatch=path.match(/^\/api\/admin\/raffles\/([a-f0-9]{24})\/photo$/);
+if(photoMatch&&['GET','HEAD'].includes(req.method)){const row=db.prepare('SELECT photo,photo_type FROM raffles WHERE id=?').get(photoMatch[1]);if(!row?.photo)return send(res,404,{error:'Foto no disponible'});res.setHeader('Content-Type',row.photo_type);res.setHeader('Content-Length',row.photo.length);res.setHeader('Content-Disposition','inline');return res.end(req.method==='HEAD'?undefined:Buffer.from(row.photo));}
 if(path==='/api/admin/logout'&&req.method==='POST'){sessions.delete(token(req));audit('logout');res.setHeader('Set-Cookie',cookie('',0));return send(res,200,{ok:true});}
 if(path==='/api/admin/reservations'&&req.method==='GET')return send(res,200,db.prepare('SELECT * FROM reservations ORDER BY created DESC LIMIT 500').all());
 if(path==='/api/admin/confirm'&&req.method==='POST'){const b=await body(req);if(typeof b.id!=='string'||!/^[a-f0-9]{24}$/.test(b.id))return send(res,400,{error:'Folio inválido'});db.exec('BEGIN IMMEDIATE');try{const result=db.prepare("UPDATE reservations SET status='paid' WHERE id=? AND status='pending' AND expires>=?").run(b.id,Date.now());if(result.changes)audit('payment_confirmed',b.id);db.exec('COMMIT');return send(res,result.changes?200:409,{ok:!!result.changes});}catch(error){db.exec('ROLLBACK');throw error;}}
@@ -98,3 +123,4 @@ send(res,404,{error:'No encontrado'});
 server.maxRequestsPerSocket=100;
 server.keepAliveTimeout=5000;
 server.listen(Number(process.env.PORT||3000),process.env.HOST||'127.0.0.1',()=>console.log(`Peso Ganador: puerto ${process.env.PORT||3000}`));
+
