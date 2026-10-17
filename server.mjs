@@ -15,6 +15,7 @@ const validEmail=value=>typeof value==='string'&&value.length<=254&&/^[^\s@]+@[^
 db.exec('CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY,count INTEGER,until INTEGER); CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,event TEXT,reservation TEXT,created INTEGER);');
 db.exec("CREATE TABLE IF NOT EXISTS raffles(id TEXT PRIMARY KEY,prize TEXT NOT NULL,description TEXT NOT NULL,price_cents INTEGER NOT NULL CHECK(price_cents>0),ticket_count INTEGER NOT NULL CHECK(ticket_count>0),status TEXT NOT NULL DEFAULT 'draft',photo BLOB,photo_type TEXT,created INTEGER NOT NULL);");
 const sessions=new Map();
+db.exec("CREATE TABLE IF NOT EXISTS payment_submissions(id TEXT PRIMARY KEY,reservation TEXT NOT NULL,tracking TEXT NOT NULL UNIQUE,receipt BLOB NOT NULL,receipt_type TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',reason TEXT,created INTEGER NOT NULL,reviewed INTEGER); CREATE UNIQUE INDEX IF NOT EXISTS one_pending_payment ON payment_submissions(reservation) WHERE status='pending';");
 const salt=randomBytes(32), password=process.env.ADMIN_PASSWORD;
 const hash=password?scryptSync(password,salt,64):null;
 const price=50,count=100;
@@ -63,6 +64,18 @@ if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')ret
 }
 expire();
 if(path==='/api/raffle'&&req.method==='GET')return send(res,200,{title:'Tu próximo premio empieza aquí',price,count,demo:true,taken:db.prepare('SELECT number FROM tickets').all().map(x=>x.number)});
+if(path==='/api/payments/submit'&&req.method==='POST'){
+limit('payment_submit',15,60000);const b=await body(req,1500000);
+if(typeof b.folio!=='string'||!/^[a-f0-9]{24}$/i.test(b.folio.trim())||typeof b.phone!=='string'||!/^\d{10}$/.test(b.phone)||typeof b.tracking!=='string'||b.tracking.length>100)return send(res,400,{error:'Revisa folio, teléfono y clave de rastreo.'});
+const row=db.prepare('SELECT id,status,expires FROM reservations WHERE id=? AND phone=?').get(b.folio.trim().toLowerCase(),b.phone);
+if(!row)return send(res,404,{error:'No encontramos una coincidencia con esos datos y folio.'});
+if(row.status!=='pending'||row.expires<Date.now())return send(res,409,{error:'El apartado no está vigente. Contacta a administración; no envíes pagos.'});
+const tracking=b.tracking.replace(/\s/g,'').toUpperCase();if(!/^[A-Z0-9]{6,64}$/.test(tracking))return send(res,400,{error:'La clave de rastreo debe tener de 6 a 64 letras o números.'});
+if(!b.receipt)return send(res,400,{error:'Adjunta el comprobante de prueba en JPG o PNG.'});
+const receipt=rafflePhoto(b.receipt),id=randomBytes(12).toString('hex');
+try{db.prepare('INSERT INTO payment_submissions(id,reservation,tracking,receipt,receipt_type,created) VALUES(?,?,?,?,?,?)').run(id,row.id,tracking,receipt.bytes,receipt.type,Date.now());}catch(error){if(String(error.code).includes('CONSTRAINT')||String(error.message).includes('UNIQUE'))return send(res,409,{error:'No se pudo registrar: existe un envío pendiente o la referencia ya fue utilizada. Consulta a administración.'});throw error;}
+return send(res,201,{id,status:'pending',demo:true,message:'Comprobante de prueba recibido para revisión. No acredita un pago ni extiende el apartado.'});
+}
 if(path==='/api/tickets/random'&&req.method==='POST'){
 limit('random_tickets',60,60000);const b=await body(req);
 if(!Number.isInteger(b.quantity)||b.quantity<1||b.quantity>10)return send(res,400,{error:'Elige entre 1 y 10 boletos.'});
@@ -79,7 +92,8 @@ if(!['name','phone','email'].includes(b.method)||typeof b.value!=='string'||!b.v
 const row=db.prepare('SELECT id,name,phone,email,numbers,status,created,expires FROM reservations WHERE id=?').get(b.folio.trim().toLowerCase());
 const matches=row&&(b.method==='name'?normalizeName(row.name)===normalizeName(b.value):b.method==='phone'?row.phone===b.value.trim():row.email&&row.email===b.value.trim().toLowerCase());
 if(!matches)return send(res,404,{error:'No encontramos una coincidencia con esos datos y folio. Revisa ambos e intenta de nuevo.'});
-return send(res,200,{folio:row.id,numbers:JSON.parse(row.numbers),status:row.status,created:row.created,expires:row.expires,demo:true});
+const payment=db.prepare('SELECT status,reason FROM payment_submissions WHERE reservation=? ORDER BY created DESC,id DESC LIMIT 1').get(row.id);
+return send(res,200,{folio:row.id,numbers:JSON.parse(row.numbers),status:row.status,created:row.created,expires:row.expires,payment:payment||null,demo:true});
 }
 if(path==='/api/reservations'&&req.method==='POST'){
 limit('reservations',30,60000);
@@ -102,6 +116,15 @@ sessions.clear();const sessionToken=randomBytes(32).toString('hex');sessions.set
 }
 if(path.startsWith('/api/admin/')){
 if(!admin(req))return send(res,401,{error:'Inicia sesión'});
+if(path==='/api/admin/payments'&&req.method==='GET')return send(res,200,db.prepare('SELECT p.id,p.reservation,p.tracking,p.status,p.reason,p.created,p.reviewed,r.name,r.phone,r.numbers,r.status AS reservation_status,r.expires FROM payment_submissions p JOIN reservations r ON r.id=p.reservation ORDER BY p.created DESC,p.id DESC LIMIT 100').all());
+const receiptMatch=path.match(/^\/api\/admin\/payments\/([a-f0-9]{24})\/receipt$/);
+if(receiptMatch&&['GET','HEAD'].includes(req.method)){const row=db.prepare('SELECT receipt,receipt_type FROM payment_submissions WHERE id=?').get(receiptMatch[1]);if(!row)return send(res,404,{error:'Comprobante no disponible'});res.setHeader('Content-Type',row.receipt_type);return res.end(req.method==='HEAD'?undefined:Buffer.from(row.receipt));}
+if(path==='/api/admin/payments/review'&&req.method==='POST'){
+const b=await body(req);if(typeof b.id!=='string'||!/^[a-f0-9]{24}$/.test(b.id)||!['approved','rejected'].includes(b.decision)||typeof b.reason!=='string'||b.reason.trim().length<5||b.reason.length>500)return send(res,400,{error:'Selecciona una decisión y escribe un motivo de 5 a 500 caracteres.'});
+db.exec('BEGIN IMMEDIATE');try{const p=db.prepare('SELECT * FROM payment_submissions WHERE id=?').get(b.id);if(!p||p.status!=='pending'){db.exec('ROLLBACK');return send(res,409,{error:'El comprobante ya fue revisado o no existe.'});}
+if(b.decision==='approved'){const changed=db.prepare("UPDATE reservations SET status='paid' WHERE id=? AND status='pending' AND expires>=?").run(p.reservation,Date.now());if(!changed.changes){db.exec('ROLLBACK');return send(res,409,{error:'El apartado venció o ya fue procesado. No se reasignaron boletos; requiere aclaración.'});}}
+db.prepare('UPDATE payment_submissions SET status=?,reason=?,reviewed=? WHERE id=?').run(b.decision,b.reason.trim(),Date.now(),p.id);audit(b.decision==='approved'?'payment_confirmed':'payment_rejected',p.reservation);db.exec('COMMIT');return send(res,200,{ok:true});}catch(error){db.exec('ROLLBACK');throw error;}
+}
 if(path==='/api/admin/raffles'&&req.method==='GET')return send(res,200,db.prepare("SELECT id,prize,description,price_cents,ticket_count,status,created,photo IS NOT NULL AS has_photo FROM raffles ORDER BY created DESC,id DESC LIMIT 100").all());
 if(path==='/api/admin/raffles'&&req.method==='POST'){
 limit('create_raffle',10,60000);const b=await body(req,1500000);
@@ -113,7 +136,7 @@ const photoMatch=path.match(/^\/api\/admin\/raffles\/([a-f0-9]{24})\/photo$/);
 if(photoMatch&&['GET','HEAD'].includes(req.method)){const row=db.prepare('SELECT photo,photo_type FROM raffles WHERE id=?').get(photoMatch[1]);if(!row?.photo)return send(res,404,{error:'Foto no disponible'});res.setHeader('Content-Type',row.photo_type);res.setHeader('Content-Length',row.photo.length);res.setHeader('Content-Disposition','inline');return res.end(req.method==='HEAD'?undefined:Buffer.from(row.photo));}
 if(path==='/api/admin/logout'&&req.method==='POST'){sessions.delete(token(req));audit('logout');res.setHeader('Set-Cookie',cookie('',0));return send(res,200,{ok:true});}
 if(path==='/api/admin/reservations'&&req.method==='GET')return send(res,200,db.prepare('SELECT * FROM reservations ORDER BY created DESC LIMIT 500').all());
-if(path==='/api/admin/confirm'&&req.method==='POST'){const b=await body(req);if(typeof b.id!=='string'||!/^[a-f0-9]{24}$/.test(b.id))return send(res,400,{error:'Folio inválido'});db.exec('BEGIN IMMEDIATE');try{const result=db.prepare("UPDATE reservations SET status='paid' WHERE id=? AND status='pending' AND expires>=?").run(b.id,Date.now());if(result.changes)audit('payment_confirmed',b.id);db.exec('COMMIT');return send(res,result.changes?200:409,{ok:!!result.changes});}catch(error){db.exec('ROLLBACK');throw error;}}
+if(path==='/api/admin/confirm'&&req.method==='POST')return send(res,410,{error:'Revisa el comprobante y registra el motivo desde Pagos por revisar.'});
 }
 const files={'/':'index.html','/CFAD':'admin.html','/CFAD/':'admin.html','/app.js':'app.js','/admin.js':'admin.js','/style.css':'style.css','/admin.css':'admin.css','/logo.png':'logo.png','/favicon.ico':'favicon.ico','/favicon-32.png':'favicon-32.png','/favicon-192.png':'favicon-192.png','/apple-touch-icon.png':'apple-touch-icon.png'};
 if(['GET','HEAD'].includes(req.method)&&Object.hasOwn(files,path)){res.setHeader('Content-Type',path.endsWith('.png')?'image/png':path.endsWith('.ico')?'image/x-icon':path.endsWith('.js')?'text/javascript; charset=utf-8':path.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8');return res.end(req.method==='HEAD'?undefined:readFileSync(new URL(`public/${files[path]}`,import.meta.url)));}
@@ -123,5 +146,6 @@ send(res,404,{error:'No encontrado'});
 server.maxRequestsPerSocket=100;
 server.keepAliveTimeout=5000;
 server.listen(Number(process.env.PORT||3000),process.env.HOST||'127.0.0.1',()=>console.log(`Peso Ganador: puerto ${process.env.PORT||3000}`));
+
 
 

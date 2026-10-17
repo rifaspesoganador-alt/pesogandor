@@ -31,3 +31,9 @@ El correo es opcional al reservar y se incorpora con una migración aditiva de S
 CFAD permite crear borradores con premio, descripción, precio por boleto en MXN, cantidad de boletos y foto opcional JPG/PNG (máximo 1 MB, dimensiones máximas 4096 × 4096). Los importes se guardan como centavos enteros. Datos e imagen quedan en la tabla `raffles` de la misma SQLite persistente y las rutas de borradores y fotos requieren sesión administrativa. La migración agrega una tabla; no modifica los apartados previos.
 
 Guardar un borrador no publica ni cambia el sorteo de demostración. La publicación/activación y edición de estas nuevas rifas no forman parte de esta alta; requieren un flujo posterior que vincule boletos, reservas y reglas al sorteo correspondiente.
+
+## Comprobantes de prueba y revisión manual
+
+El formulario público solicita folio, teléfono registrado, clave de rastreo y comprobante JPG/PNG de prueba (máximo 1 MB). Solo acepta apartados pendientes vigentes y una solicitud pendiente por apartado; la referencia normalizada no puede reutilizarse. El archivo se guarda en SQLite y solo se descarga con sesión administrativa. No se muestran claves ni archivos en la consulta pública del folio.
+
+La bandeja «Pagos por revisar» permite aprobar o rechazar con motivo obligatorio, visible al participante. La aprobación y el cambio de estado son transaccionales, se auditan y rechazan apartados vencidos. Enviar evidencia no extiende el apartado ni comprueba una transferencia. La antigua ruta de confirmación sin evidencia devuelve 410. No existe consulta bancaria o validación de CEP automática. Se conserva el modo demostración y se solicitan imágenes sin datos bancarios reales.

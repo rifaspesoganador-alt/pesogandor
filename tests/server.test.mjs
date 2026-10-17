@@ -34,11 +34,15 @@ assert.equal((await lookup('email',' Test@Example.COM ')).status,200);
 const wrong=await lookup('phone','5599999999');const absent=await lookup('phone',data.phone,'0'.repeat(24));assert.equal(wrong.status,404);assert.equal(absent.status,404);assert.deepEqual(await wrong.json(),await absent.json());
 assert.equal((await post('/api/tickets/lookup',{method:'phone',value:data.phone,folio:reservation.id},{Origin:'https://evil.example'})).status,403);
 assert.equal((await post('/api/reservations',{...data,numbers:[6],email:123})).status,400);
-assert.equal((await post('/api/admin/confirm',{id:reservation.id},{Cookie:cookie})).status,200);
+assert.equal((await post('/api/admin/confirm',{id:reservation.id},{Cookie:cookie})).status,410);
+const receipt={type:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1sAAAAASUVORK5CYII='};
+const submitted=await post('/api/payments/submit',{folio:reservation.id,phone:data.phone,tracking:'PRUEBA123456',receipt});assert.equal(submitted.status,201);const payment=await submitted.json();
+assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'approved',reason:'Evidencia de prueba verificada'},{Cookie:cookie})).status,200);
+assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'approved',reason:'Reintento'},{Cookie:cookie})).status,409);
 const paid=await (await lookup('email','test@example.com')).json();assert.equal(paid.status,'paid');assert.deepEqual(paid.numbers,[5]);assert.equal(paid.demo,true);for(const key of ['name','phone','email','password'])assert.equal(Object.hasOwn(paid,key),false);
-assert.equal((await post('/api/admin/confirm',{id:reservation.id},{Cookie:cookie})).status,409);
+assert.equal((await post('/api/admin/confirm',{id:reservation.id},{Cookie:cookie})).status,410);
 const records=await (await fetch(base+'/api/admin/reservations',{headers:{Cookie:cookie}})).json();assert.equal(records[0].status,'paid');
-assert.equal((await post('/api/admin/confirm',{id:{}},{Cookie:cookie})).status,400);
+assert.equal((await post('/api/admin/confirm',{id:{}},{Cookie:cookie})).status,410);
 assert.equal((await post('/api/admin/logout',{}, {Cookie:cookie,Origin:'https://evil.example'})).status,403);
 assert.equal((await post('/api/admin/logout',{}, {Cookie:cookie})).status,200);
 assert.equal((await fetch(base+'/api/admin/reservations',{headers:{Cookie:cookie}})).status,401);
@@ -119,3 +123,23 @@ await stop();await start();cookie='';await login();const list=await (await fetch
 }finally{await stop();rmSync(dir,{recursive:true,force:true});}
 });
 
+
+
+test('receipts stay private; uploads need owner data and review never reallocates expired tickets',async()=>{
+const dir=mkdtempSync(join(tmpdir(),'peso-receipts-'));const base='http://localhost:3102';const proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env:{...process.env,PORT:'3102',NODE_ENV:'test',PUBLIC_ORIGIN:base,ADMIN_PASSWORD:'test-receipt-password'}});
+const post=(path,data,cookie='')=>fetch(base+path,{method:'POST',headers:{Origin:base,'Content-Type':'application/json',Cookie:cookie},body:JSON.stringify(data)});
+const receipt={type:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1sAAAAASUVORK5CYII='};
+try{await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});
+const reserved=await (await post('/api/reservations',{name:'Receipt Test',phone:'5512345678',numbers:[2]})).json();const payload={folio:reserved.id,phone:'5512345678',tracking:'TEST123456',receipt};
+assert.equal((await post('/api/payments/submit',{...payload,phone:'5500000000'})).status,404);assert.equal((await post('/api/payments/submit',{...payload,receipt:null})).status,400);
+const created=await post('/api/payments/submit',payload);assert.equal(created.status,201);const payment=await created.json();assert.equal((await post('/api/payments/submit',payload)).status,409);
+assert.equal((await fetch(base+`/api/admin/payments/${payment.id}/receipt`)).status,401);
+assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'approved',reason:'Test reason'})).status,401);
+const login=await post('/api/login',{password:'test-receipt-password'});const cookie=login.headers.get('set-cookie').split(';')[0];const receiptResponse=await fetch(base+`/api/admin/payments/${payment.id}/receipt`,{headers:{Cookie:cookie}});assert.equal(receiptResponse.status,200);assert.equal(receiptResponse.headers.get('content-type'),'image/png');
+const db=new DatabaseSync(join(dir,'data/peso.db'));db.prepare('UPDATE reservations SET expires=1 WHERE id=?').run(reserved.id);db.close();
+assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'approved',reason:'Test reason'},cookie)).status,409);
+const raffle=await (await fetch(base+'/api/raffle')).json();assert.ok(!raffle.taken.includes(2));
+assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'rejected',reason:'Apartado vencido, aclarar prueba'},cookie)).status,200);
+const lookup=await (await post('/api/tickets/lookup',{folio:reserved.id,method:'phone',value:'5512345678'})).json();assert.equal(lookup.payment.status,'rejected');assert.equal(lookup.status,'expired');assert.equal(Object.hasOwn(lookup.payment,'receipt'),false);
+}finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;rmSync(dir,{recursive:true,force:true});}
+});
