@@ -1,0 +1,35 @@
+name: peso-ganador
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    environment:
+      PUBLIC_ORIGIN: https://pesoganador.com
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Configure ADMIN_PASSWORD en .env}
+    volumes:
+      - peso_data:/app/data
+    networks:
+      - proxy
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=n8n_default'
+      - 'traefik.http.routers.peso-ganador.rule=Host(`pesoganador.com`) || Host(`www.pesoganador.com`)'
+      - 'traefik.http.routers.peso-ganador.entrypoints=websecure'
+      - 'traefik.http.routers.peso-ganador.tls=true'
+      - 'traefik.http.routers.peso-ganador.tls.certresolver=mytlschallenge'
+      - 'traefik.http.routers.peso-ganador.middlewares=peso-canonical'
+      - 'traefik.http.middlewares.peso-canonical.redirectregex.regex=^https://www[.]pesoganador[.]com/(.*)'
+      - 'traefik.http.middlewares.peso-canonical.redirectregex.replacement=https://pesoganador.com/$${1}'
+      - 'traefik.http.middlewares.peso-canonical.redirectregex.permanent=true'
+      - 'traefik.http.services.peso-ganador.loadbalancer.server.port=3000'
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+volumes:
+  peso_data:
+networks:
+  proxy:
+    external: true
+    name: n8n_default

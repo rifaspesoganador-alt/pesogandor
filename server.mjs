@@ -46,4 +46,4 @@ if(req.method==='GET'&&files[path]){res.setHeader('Content-Type',path.endsWith('
 send(res,404,{error:'No encontrado'});
 }catch{send(res,400,{error:'Solicitud inválida'});}
 });
-server.listen(Number(process.env.PORT||3000),'127.0.0.1',()=>console.log(`Peso Ganador: http://localhost:${process.env.PORT||3000}`));
+server.listen(Number(process.env.PORT||3000),process.env.HOST||'127.0.0.1',()=>console.log(`Peso Ganador: puerto ${process.env.PORT||3000}`));
