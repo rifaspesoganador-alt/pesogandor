@@ -77,3 +77,23 @@ await stop();await start();assert.equal((await post(env.ADMIN_PASSWORD)).status,
 assert.equal((await fetch(base+'/api/admin/reservations',{headers:{Cookie:cookie.split(';')[0]}})).status,401);
 }finally{await stop();rmSync(dir,{recursive:true,force:true});}
 });
+
+test('lucky machine draws unique available tickets without reserving them',async()=>{
+const dir=mkdtempSync(join(tmpdir(),'peso-lucky-'));
+const proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env:{...process.env,PORT:'3100',NODE_ENV:'test',PUBLIC_ORIGIN:'http://localhost:3100'}});
+const base='http://localhost:3100';const post=(path,data,origin=base)=>fetch(base+path,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(data)});
+const draw=quantity=>post('/api/tickets/random',{quantity});
+try{
+await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});
+for(const quantity of [0,11,-1,1.5,'3',null])assert.equal((await draw(quantity)).status,400);
+assert.equal((await post('/api/tickets/random',{quantity:3},'https://evil.example')).status,403);
+for(let i=0;i<5;i++){const r=await draw(10);assert.equal(r.status,200);const data=await r.json();assert.equal(data.numbers.length,10);assert.equal(new Set(data.numbers).size,10);assert.ok(data.numbers.every(n=>Number.isInteger(n)&&n>=0&&n<100));}
+assert.deepEqual((await (await fetch(base+'/api/raffle')).json()).taken,[]);
+for(let batch=0;batch<10;batch++){
+const numbers=Array.from({length:10},(_,i)=>batch*10+i);
+const reserved=await post('/api/reservations',{name:'Lucky Test',phone:'55'+String(batch).padStart(8,'0'),numbers});assert.equal(reserved.status,201);
+if(batch===0){const r=await draw(10);const data=await r.json();assert.ok(data.numbers.every(n=>n>=10));}
+}
+const empty=await draw(1);assert.equal(empty.status,409);assert.equal((await empty.json()).available,0);
+}finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;rmSync(dir,{recursive:true,force:true});}
+});

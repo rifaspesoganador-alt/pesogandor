@@ -1,7 +1,7 @@
 import http from 'node:http';
 import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync,readFileSync} from 'node:fs';
-import {randomBytes,scryptSync,timingSafeEqual} from 'node:crypto';
+import {randomBytes,randomInt,scryptSync,timingSafeEqual} from 'node:crypto';
 process.umask(0o077);
 const production=process.env.NODE_ENV==='production';
 const origin=process.env.PUBLIC_ORIGIN||`http://localhost:${process.env.PORT||3000}`;
@@ -47,6 +47,15 @@ if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')ret
 }
 expire();
 if(path==='/api/raffle'&&req.method==='GET')return send(res,200,{title:'Tu próximo premio empieza aquí',price,count,demo:true,taken:db.prepare('SELECT number FROM tickets').all().map(x=>x.number)});
+if(path==='/api/tickets/random'&&req.method==='POST'){
+limit('random_tickets',60,60000);const b=await body(req);
+if(!Number.isInteger(b.quantity)||b.quantity<1||b.quantity>10)return send(res,400,{error:'Elige entre 1 y 10 boletos.'});
+const taken=new Set(db.prepare('SELECT number FROM tickets').all().map(row=>row.number));
+const available=Array.from({length:count},(_,n)=>n).filter(n=>!taken.has(n));
+if(available.length<b.quantity)return send(res,409,{error:`Solo quedan ${available.length} boletos disponibles. Reduce la cantidad.`,available:available.length});
+for(let i=0;i<b.quantity;i++){const j=randomInt(i,available.length);[available[i],available[j]]=[available[j],available[i]];}
+return send(res,200,{numbers:available.slice(0,b.quantity),quantity:b.quantity,demo:true});
+}
 if(path==='/api/tickets/lookup'&&req.method==='POST'){
 limit('ticket_lookup',30,60000);
 const b=await body(req);
