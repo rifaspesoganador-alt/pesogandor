@@ -3,6 +3,14 @@ services:
   web:
     build: .
     restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 100
+    mem_limit: 512m
+    cpus: 1.0
     environment:
       PUBLIC_ORIGIN: https://pesoganador.com
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Configure ADMIN_PASSWORD en .env}
