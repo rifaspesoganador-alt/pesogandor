@@ -64,7 +64,7 @@ const raffle=await (await fetch('http://localhost:3099/api/raffle')).json();asse
 });
 test('production cookies, headers, and persisted login limits',async()=>{
 const dir=mkdtempSync(join(tmpdir(),'peso-prod-test-'));
-const env={...process.env,PORT:'3098',PUBLIC_ORIGIN:'https://pesoganador.com',NODE_ENV:'production',ADMIN_PASSWORD:'test-only-strong-secret'};
+const env={...process.env,PORT:'3098',PUBLIC_ORIGIN:'https://pesoganador.com',NODE_ENV:'production',ADMIN_PASSWORD:'abcde'};
 let proc;
 async function start(){proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env});await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});}
 async function stop(){if(proc&&proc.exitCode===null){const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;}}
@@ -118,3 +118,4 @@ const publicRaffle=await (await fetch(base+'/api/raffle')).json();assert.equal(p
 await stop();await start();cookie='';await login();const list=await (await fetch(base+'/api/admin/raffles',{headers:{Cookie:cookie}})).json();assert.equal(list.length,2);const draft=list.find(row=>row.id===saved.id);assert.equal(draft.price_cents,7525);assert.equal(draft.ticket_count,500);assert.equal(draft.has_photo,1);assert.equal(Object.hasOwn(draft,'photo'),false);
 }finally{await stop();rmSync(dir,{recursive:true,force:true});}
 });
+

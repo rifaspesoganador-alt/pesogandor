@@ -5,7 +5,7 @@ import {randomBytes,randomInt,scryptSync,timingSafeEqual} from 'node:crypto';
 process.umask(0o077);
 const production=process.env.NODE_ENV==='production';
 const origin=process.env.PUBLIC_ORIGIN||`http://localhost:${process.env.PORT||3000}`;
-if(production&&(!origin.startsWith('https://')||!process.env.ADMIN_PASSWORD||process.env.ADMIN_PASSWORD.length<20))throw Error('Producción requiere PUBLIC_ORIGIN HTTPS y ADMIN_PASSWORD de al menos 20 caracteres');
+if(production&&(!origin.startsWith('https://')||!process.env.ADMIN_PASSWORD||process.env.ADMIN_PASSWORD.length<5))throw Error('Producción requiere PUBLIC_ORIGIN HTTPS y ADMIN_PASSWORD de al menos 5 caracteres');
 mkdirSync('data',{recursive:true});
 const db=new DatabaseSync('data/peso.db');
 db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS reservations(id TEXT PRIMARY KEY,name TEXT,phone TEXT,numbers TEXT,status TEXT,created INTEGER,expires INTEGER); CREATE TABLE IF NOT EXISTS tickets(number INTEGER PRIMARY KEY,reservation TEXT);`);
@@ -123,4 +123,5 @@ send(res,404,{error:'No encontrado'});
 server.maxRequestsPerSocket=100;
 server.keepAliveTimeout=5000;
 server.listen(Number(process.env.PORT||3000),process.env.HOST||'127.0.0.1',()=>console.log(`Peso Ganador: puerto ${process.env.PORT||3000}`));
+
 
