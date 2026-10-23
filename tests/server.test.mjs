@@ -113,7 +113,7 @@ async function start(){proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:
 async function stop(){if(proc&&proc.exitCode===null){const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;}}
 let cookie='';const post=(path,data,extra={})=>fetch(base+path,{method:'POST',headers:{Origin:base,'Content-Type':'application/json',Cookie:cookie,...extra},body:JSON.stringify(data)});
 const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1sAAAAASUVORK5CYII=';
-const input={prize:'Premio de ejemplo',description:'Descripción de prueba',price:'75.25',ticketCount:500,photo:{type:'image/png',base64:png}};
+const input={prize:'Premio de ejemplo',description:'Descripción de prueba',price:'75.25',ticketCount:500,startsAt:'2030-01-01T09:00:00-06:00',endsAt:'2030-01-10T18:00:00-06:00',drawAt:'2030-01-11T12:00:00-06:00',photo:{type:'image/png',base64:png}};
 try{await start();assert.equal((await post('/api/admin/raffles',input)).status,401);assert.equal((await fetch(base+'/api/admin/raffles')).status,401);
 async function login(){const r=await post('/api/login',{password:env.ADMIN_PASSWORD});assert.equal(r.status,200);cookie=r.headers.get('set-cookie').split(';')[0];}await login();
 assert.equal((await post('/api/admin/raffles',input,{Origin:'https://evil.example'})).status,403);
@@ -128,9 +128,12 @@ assert.equal((await post('/api/admin/raffles/visibility',{id:saved.id,visible:tr
 const showcase=await (await fetch(base+'/api/raffles')).json();assert.equal(showcase.length,1);assert.equal(showcase[0].price_cents,7525);assert.equal((await fetch(base+publicPhotoPath)).status,200);
 assert.equal((await post('/api/admin/raffles/visibility',{id:saved.id,visible:false})).status,200);
 assert.equal((await fetch(base+publicPhotoPath)).status,404);assert.equal((await (await fetch(base+'/api/raffles')).json()).length,0);
+assert.equal((await post('/api/admin/raffles/dates',{id:saved.id,startsAt:input.startsAt,endsAt:input.startsAt,drawAt:input.drawAt})).status,400);
+assert.equal((await post('/api/admin/raffles/dates',{id:saved.id,startsAt:'2030-02-30T09:00:00-06:00',endsAt:'2030-03-10T09:00:00-06:00',drawAt:'2030-03-11T09:00:00-06:00'})).status,400);
+assert.equal((await post('/api/admin/raffles/dates',{id:saved.id,startsAt:input.startsAt,endsAt:input.endsAt,drawAt:'2030-01-12T12:00:00-06:00'})).status,200);
 const noPhoto=await post('/api/admin/raffles',{...input,photo:null});assert.equal(noPhoto.status,201);
 const publicRaffle=await (await fetch(base+'/api/raffle')).json();assert.equal(publicRaffle.price,50);assert.equal(publicRaffle.count,100);
-await stop();await start();cookie='';await login();const list=await (await fetch(base+'/api/admin/raffles',{headers:{Cookie:cookie}})).json();assert.equal(list.length,2);const draft=list.find(row=>row.id===saved.id);assert.equal(draft.price_cents,7525);assert.equal(draft.ticket_count,500);assert.equal(draft.has_photo,1);assert.equal(Object.hasOwn(draft,'photo'),false);
+await stop();await start();cookie='';await login();const list=await (await fetch(base+'/api/admin/raffles',{headers:{Cookie:cookie}})).json();assert.equal(list.length,2);const draft=list.find(row=>row.id===saved.id);assert.equal(draft.price_cents,7525);assert.equal(draft.ticket_count,500);assert.equal(draft.has_photo,1);assert.equal(draft.starts_at,Date.parse(input.startsAt));assert.equal(draft.draw_at,Date.parse('2030-01-12T12:00:00-06:00'));assert.equal(Object.hasOwn(draft,'photo'),false);
 }finally{await stop();rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -155,3 +158,19 @@ const lookup=await (await post('/api/tickets/lookup',{folio:reserved.id,method:'
 }finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;rmSync(dir,{recursive:true,force:true});}
 });
 
+
+
+
+test('admin password changes survive restart and ignore old bootstrap environment',async()=>{
+const dir=mkdtempSync(join(tmpdir(),'peso-password-'));const base='http://localhost:3103';let proc,cookie='';const env={...process.env,PORT:'3103',NODE_ENV:'production',PUBLIC_ORIGIN:'https://pesoganador.com',ADMIN_PASSWORD:'initial-test-password'};
+async function start(){proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env});await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});}
+async function stop(){if(proc&&proc.exitCode===null){const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;}}
+const post=(path,data)=>fetch(base+path,{method:'POST',headers:{Origin:env.PUBLIC_ORIGIN,'Content-Type':'application/json',Cookie:cookie},body:JSON.stringify(data)});
+try{await start();assert.equal((await post('/api/admin/password',{currentPassword:env.ADMIN_PASSWORD,newPassword:'new-test-password'})).status,401);
+const login=await post('/api/login',{password:env.ADMIN_PASSWORD});cookie=login.headers.get('set-cookie').split(';')[0];assert.equal(login.status,200);
+assert.equal((await post('/api/admin/password',{currentPassword:'wrong-password',newPassword:'new-test-password'})).status,401);
+assert.equal((await post('/api/admin/password',{currentPassword:env.ADMIN_PASSWORD,newPassword:'1234'})).status,400);
+assert.equal((await post('/api/admin/password',{currentPassword:env.ADMIN_PASSWORD,newPassword:'new-test-password'})).status,200);
+await stop();await start();cookie='';assert.equal((await post('/api/login',{password:env.ADMIN_PASSWORD})).status,401);assert.equal((await post('/api/login',{password:'new-test-password'})).status,200);
+}finally{await stop();rmSync(dir,{recursive:true,force:true});}
+});

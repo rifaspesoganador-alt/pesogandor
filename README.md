@@ -2,7 +2,7 @@
 
 Primera versión local, en modo demostración. Interfaz pública `/` y administración `/CFAD`. Node.js 24, servidor HTTP y SQLite persistente en `data/peso.db`, sin dependencias externas. PowerShell inicia el servicio con `./Start-PesoGanador.ps1`.
 
-Configure `ADMIN_PASSWORD` en el entorno del proceso antes de arrancar para habilitar el acceso administrativo. No guarde contraseñas en Git. `PORT` es opcional (3000 por defecto). Para producción, configure `PUBLIC_ORIGIN=https://pesoganador.com` y un proxy HTTPS que reenvíe al servicio local. El servicio solo escucha en 127.0.0.1.
+Configure `ADMIN_PASSWORD` antes del primer arranque para crear el acceso administrativo. Después, la contraseña protegida se conserva en SQLite y se cambia desde el panel. No guarde contraseñas en Git. `PORT` es opcional (3000 por defecto). Para producción, configure `PUBLIC_ORIGIN=https://pesoganador.com` y un proxy HTTPS que reenvíe al servicio local. El servicio solo escucha en 127.0.0.1.
 
 Los apartados duran una hora. La clave única de boleto y la transacción SQLite evitan doble apartado. CFAD permite revisar apartados y confirmar pago manualmente; esta versión no procesa cobros. Sesiones de una hora en memoria, cookies HttpOnly/SameSite y Secure bajo HTTPS, comprobación de origen, consultas parametrizadas, limitación de intentos de acceso y encabezados de seguridad.
 
@@ -42,4 +42,22 @@ La bandeja «Pagos por revisar» permite aprobar o rechazar con motivo obligator
 
 Los borradores admiten «Mostrar en demostración» y «Ocultar del sitio». La vitrina pública `/api/raffles` solo muestra rifas `published_demo`, con fotos públicas únicamente mientras estén visibles. No activa ventas ni vincula sus boletos al selector de prueba existente. La creación sigue siendo privada por defecto.
 
-Cada navegador conserva su propia sesión. Iniciar sesión en otro equipo ya no revoca las anteriores. Se admiten hasta 20 sesiones, con los mismos tiempos de expiración y límite de intentos. La contraseña se obtiene exclusivamente de `ADMIN_PASSWORD` del contenedor: para persistirla hay que configurar `.env` en el VPS, no solo exportarla temporalmente en una consola.
+Cada navegador conserva su propia sesión. Iniciar sesión en otro equipo ya no revoca las anteriores. Se admiten hasta 20 sesiones, con los mismos tiempos de expiración y límite de intentos. La variable `ADMIN_PASSWORD` solo inicializa el acceso si todavía no existe una credencial en SQLite. Después, los cambios de contraseña del panel persisten en el volumen y no son reemplazados por valores antiguos de `.env`.
+
+## Fechas y contraseña persistente
+
+Las rifas nuevas requieren inicio, cierre y sorteo. Se muestran en administración y en las vistas previas públicas en hora de Ciudad de México. Debe cumplirse inicio < cierre <= sorteo. La migración agrega columnas sin eliminar registros; las rifas anteriores muestran «Por definir» y permiten completar sus fechas desde el panel. Estas fechas son informativas en la demostración: no activan cobros ni cambian los boletos de prueba.
+
+Las credenciales administrativas se guardan con scrypt y sal aleatoria en `admin_credentials`, dentro de la SQLite persistente. La variable de entorno solo se usa para el primer acceso. «Tu contraseña» en CFAD solicita clave actual y confirmación de la nueva; al cambiarla se cierran las otras sesiones. Reiniciar el servicio cierra sesiones pero conserva la clave. Los respaldos de SQLite contienen hashes y datos privados y deben protegerse.
+
+Si se perdió la clave, un administrador del VPS puede ejecutar lo siguiente en `/docker/peso-ganador`, una vez desplegada esta versión. No incluye claves en historial ni imprime su valor:
+
+```bash
+read -rsp 'Nueva contraseña (5 a 200 caracteres): ' nueva
+printf '\n'
+printf '%s' "$nueva" | docker compose exec -T web node reset-admin-password.mjs
+unset nueva
+docker compose restart web
+```
+
+Este reinicio solo afecta a Peso Ganador. La herramienta modifica el hash en SQLite; no modifica `.env` ni requiere subir secretos a GitHub.

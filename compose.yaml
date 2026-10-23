@@ -13,7 +13,7 @@ services:
     cpus: 1.0
     environment:
       PUBLIC_ORIGIN: https://pesoganador.com
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Configure ADMIN_PASSWORD en .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     volumes:
       - peso_data:/app/data
     networks:
@@ -41,3 +41,4 @@ networks:
   proxy:
     external: true
     name: n8n_default
+

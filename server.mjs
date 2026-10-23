@@ -1,11 +1,12 @@
 import http from 'node:http';
 import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync,readFileSync} from 'node:fs';
-import {randomBytes,randomInt,scryptSync,timingSafeEqual} from 'node:crypto';
+import {randomBytes,randomInt} from 'node:crypto';
+import {credentialStore} from './credentials.mjs';
 process.umask(0o077);
 const production=process.env.NODE_ENV==='production';
 const origin=process.env.PUBLIC_ORIGIN||`http://localhost:${process.env.PORT||3000}`;
-if(production&&(!origin.startsWith('https://')||!process.env.ADMIN_PASSWORD||process.env.ADMIN_PASSWORD.length<5))throw Error('Producción requiere PUBLIC_ORIGIN HTTPS y ADMIN_PASSWORD de al menos 5 caracteres');
+if(production&&!origin.startsWith('https://'))throw Error('Producción requiere PUBLIC_ORIGIN HTTPS');
 mkdirSync('data',{recursive:true});
 const db=new DatabaseSync('data/peso.db');
 db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS reservations(id TEXT PRIMARY KEY,name TEXT,phone TEXT,numbers TEXT,status TEXT,created INTEGER,expires INTEGER); CREATE TABLE IF NOT EXISTS tickets(number INTEGER PRIMARY KEY,reservation TEXT);`);
@@ -14,10 +15,12 @@ const normalizeName=value=>value.normalize('NFKC').trim().replace(/\s+/gu,' ').t
 const validEmail=value=>typeof value==='string'&&value.length<=254&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 db.exec('CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY,count INTEGER,until INTEGER); CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,event TEXT,reservation TEXT,created INTEGER);');
 db.exec("CREATE TABLE IF NOT EXISTS raffles(id TEXT PRIMARY KEY,prize TEXT NOT NULL,description TEXT NOT NULL,price_cents INTEGER NOT NULL CHECK(price_cents>0),ticket_count INTEGER NOT NULL CHECK(ticket_count>0),status TEXT NOT NULL DEFAULT 'draft',photo BLOB,photo_type TEXT,created INTEGER NOT NULL);");
+for(const column of ['starts_at','ends_at','draw_at'])if(!db.prepare('PRAGMA table_info(raffles)').all().some(c=>c.name===column))db.exec(`ALTER TABLE raffles ADD COLUMN ${column} INTEGER`);
 const sessions=new Map();
 db.exec("CREATE TABLE IF NOT EXISTS payment_submissions(id TEXT PRIMARY KEY,reservation TEXT NOT NULL,tracking TEXT NOT NULL UNIQUE,receipt BLOB NOT NULL,receipt_type TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',reason TEXT,created INTEGER NOT NULL,reviewed INTEGER); CREATE UNIQUE INDEX IF NOT EXISTS one_pending_payment ON payment_submissions(reservation) WHERE status='pending';");
-const salt=randomBytes(32), password=process.env.ADMIN_PASSWORD;
-const hash=password?scryptSync(password,salt,64):null;
+const credentials=credentialStore(db,process.env.ADMIN_PASSWORD);
+if(production&&!credentials.exists())throw Error('Configura ADMIN_PASSWORD de al menos 5 caracteres para el primer arranque.');
+function raffleDates(b){const values=[b.startsAt,b.endsAt,b.drawAt];if(values.some(value=>typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00-06:00$/.test(value)))throw problem(400,'Indica inicio, cierre y sorteo en hora del centro de México.');const dates=values.map(Date.parse);if(dates.some((n,i)=>!Number.isFinite(n)||new Date(n-21600000).toISOString().slice(0,16)!==values[i].slice(0,16))||dates[0]>=dates[1]||dates[1]>dates[2])throw problem(400,'El inicio debe ser anterior al cierre y el sorteo debe ser igual o posterior al cierre.');return dates;}
 const price=50,count=100;
 function send(res,status,value){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));}
 function expire(){const now=Date.now(); db.prepare("DELETE FROM tickets WHERE reservation IN (SELECT id FROM reservations WHERE status='pending' AND expires < ?)").run(now);db.prepare("UPDATE reservations SET status='expired' WHERE status='pending' AND expires < ?").run(now);}
@@ -64,7 +67,7 @@ if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')ret
 }
 expire();
 if(path==='/api/raffle'&&req.method==='GET')return send(res,200,{title:'Tu próximo premio empieza aquí',price,count,demo:true,taken:db.prepare('SELECT number FROM tickets').all().map(x=>x.number)});
-if(path==='/api/raffles'&&req.method==='GET')return send(res,200,db.prepare("SELECT id,prize,description,price_cents,ticket_count,photo IS NOT NULL AS has_photo FROM raffles WHERE status='published_demo' ORDER BY created DESC LIMIT 100").all());
+if(path==='/api/raffles'&&req.method==='GET')return send(res,200,db.prepare("SELECT id,prize,description,price_cents,ticket_count,starts_at,ends_at,draw_at,photo IS NOT NULL AS has_photo FROM raffles WHERE status='published_demo' ORDER BY created DESC LIMIT 100").all());
 const publicPhoto=path.match(/^\/api\/raffles\/([a-f0-9]{24})\/photo$/);
 if(publicPhoto&&['GET','HEAD'].includes(req.method)){const row=db.prepare("SELECT photo,photo_type FROM raffles WHERE id=? AND status='published_demo'").get(publicPhoto[1]);if(!row?.photo)return send(res,404,{error:'Foto no disponible'});res.setHeader('Content-Type',row.photo_type);return res.end(req.method==='HEAD'?undefined:Buffer.from(row.photo));}
 if(path==='/api/payments/submit'&&req.method==='POST'){
@@ -112,9 +115,9 @@ db.prepare('INSERT INTO reservations(id,name,phone,numbers,status,created,expire
 return send(res,201,{id,total:nums.length*price,message:'Apartado de demostración por 60 minutos. No realices pagos.'});
 }
 if(path==='/api/login'&&req.method==='POST'){
-if(!hash)return send(res,503,{error:'Administrador pendiente de configurar en el servidor.'});
+if(!credentials.exists())return send(res,503,{error:'Administrador pendiente de configurar en el servidor.'});
 limit('login',5,900000);const now=Date.now();
-const b=await body(req);if(typeof b.password!=='string'||b.password.length>200||!timingSafeEqual(hash,scryptSync(b.password,salt,64)))return send(res,401,{error:'Credenciales incorrectas'});
+const b=await body(req);if(!credentials.verify(b.password))return send(res,401,{error:'Credenciales incorrectas'});
 // Rotate only the session used by this browser; keep other devices signed in.
 sessions.delete(token(req));for(const [key,s] of sessions)if(s.expires<=now||s.last+900000<=now)sessions.delete(key);
 if(sessions.size>=20)return send(res,429,{error:'Se alcanzó el límite de sesiones. Cierra alguna o espera a que expire.'});
@@ -122,6 +125,8 @@ const sessionToken=randomBytes(32).toString('hex');sessions.set(sessionToken,{ex
 }
 if(path.startsWith('/api/admin/')){
 if(!admin(req))return send(res,401,{error:'Inicia sesión'});
+if(path==='/api/admin/password'&&req.method==='POST'){limit('change_password',5,900000);const b=await body(req);if(!credentials.verify(b.currentPassword))return send(res,401,{error:'La contraseña actual no coincide.'});if(typeof b.newPassword!=='string'||b.newPassword.length<5||b.newPassword.length>200)return send(res,400,{error:'La contraseña debe tener entre 5 y 200 caracteres.'});credentials.save(b.newPassword);const current=token(req);for(const key of sessions.keys())if(key!==current)sessions.delete(key);audit('password_changed');return send(res,200,{ok:true});}
+if(path==='/api/admin/raffles/dates'&&req.method==='POST'){const b=await body(req);if(typeof b.id!=='string'||!/^[a-f0-9]{24}$/.test(b.id))return send(res,400,{error:'Rifa inválida'});const dates=raffleDates(b);const result=db.prepare('UPDATE raffles SET starts_at=?,ends_at=?,draw_at=? WHERE id=?').run(...dates,b.id);if(!result.changes)return send(res,404,{error:'Rifa no disponible'});audit('raffle_dates_changed',b.id);return send(res,200,{ok:true});}
 if(path==='/api/admin/raffles/visibility'&&req.method==='POST'){const b=await body(req);if(typeof b.id!=='string'||!/^[a-f0-9]{24}$/.test(b.id)||typeof b.visible!=='boolean')return send(res,400,{error:'Revisa la rifa y la visibilidad.'});db.exec('BEGIN IMMEDIATE');try{const result=db.prepare("UPDATE raffles SET status=? WHERE id=? AND status IN ('draft','published_demo')").run(b.visible?'published_demo':'draft',b.id);if(!result.changes){db.exec('ROLLBACK');return send(res,404,{error:'Rifa no disponible'});}audit(b.visible?'raffle_demo_published':'raffle_demo_hidden',b.id);db.exec('COMMIT');return send(res,200,{ok:true});}catch(error){db.exec('ROLLBACK');throw error;}}
 if(path==='/api/admin/payments'&&req.method==='GET')return send(res,200,db.prepare('SELECT p.id,p.reservation,p.tracking,p.status,p.reason,p.created,p.reviewed,r.name,r.phone,r.numbers,r.status AS reservation_status,r.expires FROM payment_submissions p JOIN reservations r ON r.id=p.reservation ORDER BY p.created DESC,p.id DESC LIMIT 100').all());
 const receiptMatch=path.match(/^\/api\/admin\/payments\/([a-f0-9]{24})\/receipt$/);
@@ -132,12 +137,12 @@ db.exec('BEGIN IMMEDIATE');try{const p=db.prepare('SELECT * FROM payment_submiss
 if(b.decision==='approved'){const changed=db.prepare("UPDATE reservations SET status='paid' WHERE id=? AND status='pending' AND expires>=?").run(p.reservation,Date.now());if(!changed.changes){db.exec('ROLLBACK');return send(res,409,{error:'El apartado venció o ya fue procesado. No se reasignaron boletos; requiere aclaración.'});}}
 db.prepare('UPDATE payment_submissions SET status=?,reason=?,reviewed=? WHERE id=?').run(b.decision,b.reason.trim(),Date.now(),p.id);audit(b.decision==='approved'?'payment_confirmed':'payment_rejected',p.reservation);db.exec('COMMIT');return send(res,200,{ok:true});}catch(error){db.exec('ROLLBACK');throw error;}
 }
-if(path==='/api/admin/raffles'&&req.method==='GET')return send(res,200,db.prepare("SELECT id,prize,description,price_cents,ticket_count,status,created,photo IS NOT NULL AS has_photo FROM raffles ORDER BY created DESC,id DESC LIMIT 100").all());
+if(path==='/api/admin/raffles'&&req.method==='GET')return send(res,200,db.prepare("SELECT id,prize,description,price_cents,ticket_count,status,created,starts_at,ends_at,draw_at,photo IS NOT NULL AS has_photo FROM raffles ORDER BY created DESC,id DESC LIMIT 100").all());
 if(path==='/api/admin/raffles'&&req.method==='POST'){
 limit('create_raffle',10,60000);const b=await body(req,1500000);
 if(typeof b.prize!=='string'||b.prize.trim().length<3||b.prize.length>120||typeof b.description!=='string'||!b.description.trim()||b.description.length>5000||typeof b.price!=='string'||!/^\d{1,7}(?:\.\d{1,2})?$/.test(b.price)||!Number.isInteger(b.ticketCount)||b.ticketCount<1||b.ticketCount>100000)return send(res,400,{error:'Revisa premio, descripción, precio y cantidad (1 a 100,000 boletos).'});
 const cents=Math.round(Number(b.price)*100);if(cents<1||cents>100000000)return send(res,400,{error:'El precio debe estar entre $0.01 y $1,000,000 MXN.'});
-const photo=rafflePhoto(b.photo),id=randomBytes(12).toString('hex');db.exec('BEGIN IMMEDIATE');try{db.prepare("INSERT INTO raffles(id,prize,description,price_cents,ticket_count,status,photo,photo_type,created) VALUES(?,?,?,?,?,'draft',?,?,?)").run(id,b.prize.trim(),b.description.trim(),cents,b.ticketCount,photo.bytes,photo.type,Date.now());audit('raffle_created',id);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}return send(res,201,{id,status:'draft',message:'Rifa guardada como borrador. La rifa pública no cambió.'});
+const dates=raffleDates(b),photo=rafflePhoto(b.photo),id=randomBytes(12).toString('hex');db.exec('BEGIN IMMEDIATE');try{db.prepare("INSERT INTO raffles(id,prize,description,price_cents,ticket_count,status,photo,photo_type,created,starts_at,ends_at,draw_at) VALUES(?,?,?,?,?,'draft',?,?,?,?,?,?)").run(id,b.prize.trim(),b.description.trim(),cents,b.ticketCount,photo.bytes,photo.type,Date.now(),...dates);audit('raffle_created',id);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}return send(res,201,{id,status:'draft',message:'Rifa guardada como borrador. La rifa pública no cambió.'});
 }
 const photoMatch=path.match(/^\/api\/admin\/raffles\/([a-f0-9]{24})\/photo$/);
 if(photoMatch&&['GET','HEAD'].includes(req.method)){const row=db.prepare('SELECT photo,photo_type FROM raffles WHERE id=?').get(photoMatch[1]);if(!row?.photo)return send(res,404,{error:'Foto no disponible'});res.setHeader('Content-Type',row.photo_type);res.setHeader('Content-Length',row.photo.length);res.setHeader('Content-Disposition','inline');return res.end(req.method==='HEAD'?undefined:Buffer.from(row.photo));}
@@ -153,6 +158,7 @@ send(res,404,{error:'No encontrado'});
 server.maxRequestsPerSocket=100;
 server.keepAliveTimeout=5000;
 server.listen(Number(process.env.PORT||3000),process.env.HOST||'127.0.0.1',()=>console.log(`Peso Ganador: puerto ${process.env.PORT||3000}`));
+
 
 
 
