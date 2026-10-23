@@ -6,7 +6,7 @@ Esta aplicación sigue siendo una demostración. No hay una auditoría independi
 
 - Precio, disponibilidad, validación, exclusividad y confirmación de pagos se resuelven en el backend. El navegador no decide qué boletos están pagados.
 - SQLite se conserva en un volumen privado, sin rutas HTTP para descargarlo. Consultas parametrizadas y transacciones para reservas y confirmaciones.
-- En producción se exige contraseña de al menos 5 caracteres y origen HTTPS. Cookies `__Host-`, Secure, HttpOnly y SameSite Strict, una sesión administrativa activa, expiración absoluta de una hora e inactividad de 15 minutos, cierre de sesión y revocación al reiniciar.
+- En producción se exige contraseña de al menos 5 caracteres y origen HTTPS. Cookies `__Host-`, Secure, HttpOnly y SameSite Strict, hasta 20 sesiones administrativas independientes, expiración absoluta de una hora e inactividad de 15 minutos, cierre de sesión y revocación al reiniciar.
 - Origen exacto para POST, JSON obligatorio, límite de 8 KiB, validación estructural, CSP, HSTS y protección contra marcos.
 - Límites globales persistentes: cinco accesos cada 15 minutos, treinta intentos de reserva por minuto y diez boletos pendientes por teléfono. No se confía en cabeceras IP aportadas por el cliente. Los límites globales pueden bloquear temporalmente al administrador bajo ataque; no sustituyen protección de borde ni CAPTCHA.
 - Auditoría local de accesos exitosos, cierres de sesión y confirmaciones, sin contraseñas ni cookies. El administrador del VPS puede modificar esa auditoría; no es un registro inmutable.
@@ -23,4 +23,5 @@ Esta aplicación sigue siendo una demostración. No hay una auditoría independi
 ## Actualizar el despliegue
 
 En `/docker/peso-ganador`, ejecutar `git pull --ff-only`, `docker compose config --quiet`, `docker compose up -d --build` y `docker compose ps`. Solo se actualiza el proyecto Compose `peso-ganador`. Nunca usar `down -v` si necesita conservar datos. Los cambios no están activos en el VPS hasta reconstruir el contenedor allí.
+
 

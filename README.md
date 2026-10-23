@@ -37,3 +37,9 @@ Guardar un borrador no publica ni cambia el sorteo de demostración. La publicac
 El formulario público solicita folio, teléfono registrado, clave de rastreo y comprobante JPG/PNG de prueba (máximo 1 MB). Solo acepta apartados pendientes vigentes y una solicitud pendiente por apartado; la referencia normalizada no puede reutilizarse. El archivo se guarda en SQLite y solo se descarga con sesión administrativa. No se muestran claves ni archivos en la consulta pública del folio.
 
 La bandeja «Pagos por revisar» permite aprobar o rechazar con motivo obligatorio, visible al participante. La aprobación y el cambio de estado son transaccionales, se auditan y rechazan apartados vencidos. Enviar evidencia no extiende el apartado ni comprueba una transferencia. La antigua ruta de confirmación sin evidencia devuelve 410. No existe consulta bancaria o validación de CEP automática. Se conserva el modo demostración y se solicitan imágenes sin datos bancarios reales.
+
+## Visibilidad y sesiones (23 de octubre)
+
+Los borradores admiten «Mostrar en demostración» y «Ocultar del sitio». La vitrina pública `/api/raffles` solo muestra rifas `published_demo`, con fotos públicas únicamente mientras estén visibles. No activa ventas ni vincula sus boletos al selector de prueba existente. La creación sigue siendo privada por defecto.
+
+Cada navegador conserva su propia sesión. Iniciar sesión en otro equipo ya no revoca las anteriores. Se admiten hasta 20 sesiones, con los mismos tiempos de expiración y límite de intentos. La contraseña se obtiene exclusivamente de `ADMIN_PASSWORD` del contenedor: para persistirla hay que configurar `.env` en el VPS, no solo exportarla temporalmente en una consola.

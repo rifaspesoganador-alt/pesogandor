@@ -64,6 +64,9 @@ if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')ret
 }
 expire();
 if(path==='/api/raffle'&&req.method==='GET')return send(res,200,{title:'Tu próximo premio empieza aquí',price,count,demo:true,taken:db.prepare('SELECT number FROM tickets').all().map(x=>x.number)});
+if(path==='/api/raffles'&&req.method==='GET')return send(res,200,db.prepare("SELECT id,prize,description,price_cents,ticket_count,photo IS NOT NULL AS has_photo FROM raffles WHERE status='published_demo' ORDER BY created DESC LIMIT 100").all());
+const publicPhoto=path.match(/^\/api\/raffles\/([a-f0-9]{24})\/photo$/);
+if(publicPhoto&&['GET','HEAD'].includes(req.method)){const row=db.prepare("SELECT photo,photo_type FROM raffles WHERE id=? AND status='published_demo'").get(publicPhoto[1]);if(!row?.photo)return send(res,404,{error:'Foto no disponible'});res.setHeader('Content-Type',row.photo_type);return res.end(req.method==='HEAD'?undefined:Buffer.from(row.photo));}
 if(path==='/api/payments/submit'&&req.method==='POST'){
 limit('payment_submit',15,60000);const b=await body(req,1500000);
 if(typeof b.folio!=='string'||!/^[a-f0-9]{24}$/i.test(b.folio.trim())||typeof b.phone!=='string'||!/^\d{10}$/.test(b.phone)||typeof b.tracking!=='string'||b.tracking.length>100)return send(res,400,{error:'Revisa folio, teléfono y clave de rastreo.'});
@@ -112,10 +115,14 @@ if(path==='/api/login'&&req.method==='POST'){
 if(!hash)return send(res,503,{error:'Administrador pendiente de configurar en el servidor.'});
 limit('login',5,900000);const now=Date.now();
 const b=await body(req);if(typeof b.password!=='string'||b.password.length>200||!timingSafeEqual(hash,scryptSync(b.password,salt,64)))return send(res,401,{error:'Credenciales incorrectas'});
-sessions.clear();const sessionToken=randomBytes(32).toString('hex');sessions.set(sessionToken,{expires:now+3600000,last:now});audit('login');res.setHeader('Set-Cookie',cookie(sessionToken,3600));return send(res,200,{ok:true});
+// Rotate only the session used by this browser; keep other devices signed in.
+sessions.delete(token(req));for(const [key,s] of sessions)if(s.expires<=now||s.last+900000<=now)sessions.delete(key);
+if(sessions.size>=20)return send(res,429,{error:'Se alcanzó el límite de sesiones. Cierra alguna o espera a que expire.'});
+const sessionToken=randomBytes(32).toString('hex');sessions.set(sessionToken,{expires:now+3600000,last:now});audit('login');res.setHeader('Set-Cookie',cookie(sessionToken,3600));return send(res,200,{ok:true});
 }
 if(path.startsWith('/api/admin/')){
 if(!admin(req))return send(res,401,{error:'Inicia sesión'});
+if(path==='/api/admin/raffles/visibility'&&req.method==='POST'){const b=await body(req);if(typeof b.id!=='string'||!/^[a-f0-9]{24}$/.test(b.id)||typeof b.visible!=='boolean')return send(res,400,{error:'Revisa la rifa y la visibilidad.'});db.exec('BEGIN IMMEDIATE');try{const result=db.prepare("UPDATE raffles SET status=? WHERE id=? AND status IN ('draft','published_demo')").run(b.visible?'published_demo':'draft',b.id);if(!result.changes){db.exec('ROLLBACK');return send(res,404,{error:'Rifa no disponible'});}audit(b.visible?'raffle_demo_published':'raffle_demo_hidden',b.id);db.exec('COMMIT');return send(res,200,{ok:true});}catch(error){db.exec('ROLLBACK');throw error;}}
 if(path==='/api/admin/payments'&&req.method==='GET')return send(res,200,db.prepare('SELECT p.id,p.reservation,p.tracking,p.status,p.reason,p.created,p.reviewed,r.name,r.phone,r.numbers,r.status AS reservation_status,r.expires FROM payment_submissions p JOIN reservations r ON r.id=p.reservation ORDER BY p.created DESC,p.id DESC LIMIT 100').all());
 const receiptMatch=path.match(/^\/api\/admin\/payments\/([a-f0-9]{24})\/receipt$/);
 if(receiptMatch&&['GET','HEAD'].includes(req.method)){const row=db.prepare('SELECT receipt,receipt_type FROM payment_submissions WHERE id=?').get(receiptMatch[1]);if(!row)return send(res,404,{error:'Comprobante no disponible'});res.setHeader('Content-Type',row.receipt_type);return res.end(req.method==='HEAD'?undefined:Buffer.from(row.receipt));}

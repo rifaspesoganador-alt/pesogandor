@@ -76,7 +76,11 @@ const base='http://localhost:3098';const post=password=>fetch(base+'/api/login',
 try{
 await start();const page=await fetch(base+'/');assert.equal(page.status,200);assert.equal(page.headers.get('strict-transport-security'),'max-age=31536000');assert.equal(page.headers.get('x-frame-options'),'DENY');
 const login=await post(env.ADMIN_PASSWORD);assert.equal(login.status,200);const cookie=login.headers.get('set-cookie');assert.match(cookie,/^__Host-session=/);for(const flag of ['HttpOnly','Secure','SameSite=Strict','Path=/'])assert.ok(cookie.includes(flag));
-for(let i=0;i<4;i++)assert.equal((await post('wrong')).status,401);
+const secondLogin=await post(env.ADMIN_PASSWORD);assert.equal(secondLogin.status,200);const secondCookie=secondLogin.headers.get('set-cookie').split(';')[0];assert.notEqual(secondCookie,cookie.split(';')[0]);
+assert.equal((await fetch(base+'/api/admin/reservations',{headers:{Cookie:cookie.split(';')[0]}})).status,200);
+assert.equal((await fetch(base+'/api/admin/logout',{method:'POST',headers:{Origin:env.PUBLIC_ORIGIN,'Content-Type':'application/json',Cookie:secondCookie},body:'{}'})).status,200);
+assert.equal((await fetch(base+'/api/admin/reservations',{headers:{Cookie:cookie.split(';')[0]}})).status,200);
+for(let i=0;i<3;i++)assert.equal((await post('wrong')).status,401);
 await stop();await start();assert.equal((await post(env.ADMIN_PASSWORD)).status,429);
 assert.equal((await fetch(base+'/api/admin/reservations',{headers:{Cookie:cookie.split(';')[0]}})).status,401);
 }finally{await stop();rmSync(dir,{recursive:true,force:true});}
@@ -117,6 +121,13 @@ const good=await post('/api/admin/raffles',input);assert.equal(good.status,201);
 const photoPath=`/api/admin/raffles/${saved.id}/photo`;assert.equal((await fetch(base+photoPath)).status,401);
 const photo=await fetch(base+photoPath,{headers:{Cookie:cookie}});assert.equal(photo.status,200);assert.equal(photo.headers.get('content-type'),'image/png');assert.deepEqual(Buffer.from(await photo.arrayBuffer()),Buffer.from(png,'base64'));
 for(const change of [{price:'0'},{price:'1.001'},{ticketCount:0},{ticketCount:1.5},{prize:'x'},{description:''},{photo:{type:'image/svg+xml',base64:Buffer.from('<svg/>').toString('base64')}},{photo:{type:'image/jpeg',base64:png}}])assert.equal((await post('/api/admin/raffles',{...input,...change})).status,400);
+assert.equal((await (await fetch(base+'/api/raffles')).json()).length,0);
+const publicPhotoPath=`/api/raffles/${saved.id}/photo`;assert.equal((await fetch(base+publicPhotoPath)).status,404);
+assert.equal((await post('/api/admin/raffles/visibility',{id:saved.id,visible:true},{Cookie:''})).status,401);
+assert.equal((await post('/api/admin/raffles/visibility',{id:saved.id,visible:true})).status,200);
+const showcase=await (await fetch(base+'/api/raffles')).json();assert.equal(showcase.length,1);assert.equal(showcase[0].price_cents,7525);assert.equal((await fetch(base+publicPhotoPath)).status,200);
+assert.equal((await post('/api/admin/raffles/visibility',{id:saved.id,visible:false})).status,200);
+assert.equal((await fetch(base+publicPhotoPath)).status,404);assert.equal((await (await fetch(base+'/api/raffles')).json()).length,0);
 const noPhoto=await post('/api/admin/raffles',{...input,photo:null});assert.equal(noPhoto.status,201);
 const publicRaffle=await (await fetch(base+'/api/raffle')).json();assert.equal(publicRaffle.price,50);assert.equal(publicRaffle.count,100);
 await stop();await start();cookie='';await login();const list=await (await fetch(base+'/api/admin/raffles',{headers:{Cookie:cookie}})).json();assert.equal(list.length,2);const draft=list.find(row=>row.id===saved.id);assert.equal(draft.price_cents,7525);assert.equal(draft.ticket_count,500);assert.equal(draft.has_photo,1);assert.equal(Object.hasOwn(draft,'photo'),false);
@@ -143,3 +154,4 @@ assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'r
 const lookup=await (await post('/api/tickets/lookup',{folio:reserved.id,method:'phone',value:'5512345678'})).json();assert.equal(lookup.payment.status,'rejected');assert.equal(lookup.status,'expired');assert.equal(Object.hasOwn(lookup.payment,'receipt'),false);
 }finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;rmSync(dir,{recursive:true,force:true});}
 });
+
