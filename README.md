@@ -10,6 +10,10 @@ Configure `ADMIN_PASSWORD` antes del primer arranque para crear el acceso admini
 2. Pulsa **Nueva rifa**: premio, descripción, precio, cantidad de boletos (máximo 100,000; el sitio los muestra en páginas de 1,000 con buscador de número), fechas de inicio, cierre y sorteo (hora del centro de México) y foto opcional. Se guarda como borrador.
 3. Pulsa **Poner en venta**. Solo puede haber una rifa en venta; los boletos se pueden apartar entre el inicio y el cierre. **Cerrar ventas** detiene nuevos apartados y conserva los existentes.
 
+## Editar, borrar y reprogramar
+
+Cada rifa tiene una meta de venta (80% de los boletos pagados por defecto, editable). En el panel, **Editar** corrige premio, descripción, precio, cantidad, meta, fechas y foto (agregar, cambiar o quitar). Si ya hay boletos apartados o vendidos, el precio queda fijo y la cantidad no puede bajar por debajo del número más alto ocupado. **Borrar** solo está disponible mientras la rifa no tenga boletos apartados ni vendidos. **Reprogramar** aparece mientras no se alcance la meta: pide un nuevo cierre y una nueva fecha de sorteo, conserva todos los boletos, vuelve a poner en venta una rifa cerrada (si no hay otra en venta) y el sitio muestra «Fecha reprogramada».
+
 ## Flujo del participante
 
 Elige hasta 10 boletos (o usa la maquinita de la suerte), registra nombre, teléfono y correo opcional y ve el total a pagar. No hay folios: el teléfono identifica el apartado. Si vuelve a apartar con el mismo teléfono, los boletos se suman a su apartado pendiente (máximo 10 pendientes); mientras tenga un comprobante en revisión no puede apartar más. Paga a la cuenta publicada y envía el comprobante (JPG, PNG o PDF, máximo 5 MB) con su teléfono y clave de rastreo o referencia. Mientras el comprobante está en revisión, los boletos quedan apartados 48 horas. En «Mis boletos» busca por nombre, teléfono o correo y ve todos sus apartados (números, estado y total, sin datos personales).
