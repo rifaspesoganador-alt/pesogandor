@@ -14,6 +14,12 @@ services:
     environment:
       PUBLIC_ORIGIN: https://pesoganador.com
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      TRUST_PROXY: '1'
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-}
+      N8N_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET:-}
+      WAHA_URL: ${WAHA_URL:-http://waha:3000}
+      WAHA_API_KEY: ${WAHA_API_KEY:-}
+      WAHA_SESSION: ${WAHA_SESSION:-DEFAULT_2}
     volumes:
       - peso_data:/app/data
     networks:

@@ -6,8 +6,8 @@ Configure `ADMIN_PASSWORD` antes del primer arranque para crear el acceso admini
 
 ## Cómo poner a la venta una rifa
 
-1. Entra a `/CFAD` y, en **Datos de pago**, guarda banco, titular y al menos una CLABE, cuenta o tarjeta. También puedes indicar WhatsApp, instrucciones y cuántas horas tiene la gente para pagar (1 a 72). Sin estos datos el sitio no vende boletos.
-2. Pulsa **Nueva rifa**: premio, descripción, precio, cantidad de boletos (máximo 10,000), fechas de inicio, cierre y sorteo (hora del centro de México) y foto opcional. Se guarda como borrador.
+1. Entra a `/CFAD` y, en **Datos de pago**, guarda banco, titular y al menos una CLABE, cuenta o tarjeta. También puedes indicar WhatsApp, instrucciones y cuántas horas tiene la gente para pagar (1 a 72; 24 por defecto). El sitio muestra en rojo que el concepto debe llevar nombre o celular. Sin estos datos el sitio no vende boletos.
+2. Pulsa **Nueva rifa**: premio, descripción, precio, cantidad de boletos (máximo 100,000; el sitio los muestra en páginas de 1,000 con buscador de número), fechas de inicio, cierre y sorteo (hora del centro de México) y foto opcional. Se guarda como borrador.
 3. Pulsa **Poner en venta**. Solo puede haber una rifa en venta; los boletos se pueden apartar entre el inicio y el cierre. **Cerrar ventas** detiene nuevos apartados y conserva los existentes.
 
 ## Flujo del participante
@@ -17,6 +17,24 @@ Elige hasta 10 boletos (o usa la maquinita de la suerte), registra nombre, telé
 ## Validación de pagos
 
 En **Pagos por revisar** aparece cada comprobante con el monto esperado. Confirma en tu banca en línea que el depósito llegó antes de aprobar: una imagen se puede falsificar. Aprobar marca los boletos como pagados; rechazar exige un motivo visible para el participante y le devuelve su tiempo normal para pagar. No existe validación bancaria automática (CEP/SPEI).
+
+## WhatsApp con WAHA
+
+Al aprobar un pago, la página manda un WhatsApp al participante con sus boletos, el total, el folio, la fecha del sorteo y el enlace a «Mis boletos». Usa WAHA (WhatsApp HTTP API). En el `.env` del servidor configure:
+
+- `WAHA_URL`: dirección de WAHA, por ejemplo `https://waha.midominio.com` (o `http://waha:3000` si está en la misma red de Docker).
+- `WAHA_API_KEY`: la clave de API de WAHA (`WHATSAPP_API_KEY` en WAHA), si la tiene activada.
+- `WAHA_SESSION`: nombre de la sesión conectada en WAHA (`default` si no se indica).
+
+Antes de enviar, la página pregunta a WAHA el chat correcto del número (en México puede ser 52 o 521 + 10 dígitos). Si WhatsApp o WAHA fallan, el pago queda aprobado igualmente; el resultado se registra en la auditoría (`whatsapp_sent` o `whatsapp_failed`) y en `docker compose logs web`.
+
+## Aviso opcional a n8n
+
+Si además configura `N8N_WEBHOOK_URL`, al aprobar un pago el servidor envía un POST JSON a `N8N_WEBHOOK_URL` con `event` (`payment_approved`), `folio`, `name`, `phone`, `whatsapp` (52 + 10 dígitos), `numbers`, `amount`, `prize`, `draw_at` y `lookup_url`. Si existe `N8N_WEBHOOK_SECRET`, se envía en el encabezado `X-Peso-Secret` para que n8n rechace llamadas ajenas. Si n8n falla, el pago queda aprobado de todos modos y el error aparece en `docker compose logs web`. Configure ambas variables en el `.env` del servidor.
+
+## Límites anti-abuso
+
+Cada visitante (por IP, tomada del encabezado que agrega Traefik con `TRUST_PROXY=1`) puede hacer por minuto: 20 apartados, 20 consultas, 10 comprobantes y 60 sorteos de la maquinita. Además hay un tope general por minuto para todo el sitio: 600 apartados, 600 consultas, 300 comprobantes y 1,200 sorteos. Cada apartado admite hasta 10 boletos y cada teléfono hasta 10 boletos pendientes de pago por rifa.
 
 ## Despliegue en VPS
 

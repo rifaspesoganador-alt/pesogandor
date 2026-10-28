@@ -26,13 +26,36 @@ db.exec("CREATE TABLE IF NOT EXISTS payment_submissions(id TEXT PRIMARY KEY,rese
 const credentials=credentialStore(db,process.env.ADMIN_PASSWORD);
 if(production&&!credentials.exists())throw Error('Configura ADMIN_PASSWORD de al menos 5 caracteres para el primer arranque.');
 function raffleDates(b){const values=[b.startsAt,b.endsAt,b.drawAt];if(values.some(value=>typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00-06:00$/.test(value)))throw problem(400,'Indica inicio, cierre y sorteo en hora del centro de México.');const dates=values.map(Date.parse);if(dates.some((n,i)=>!Number.isFinite(n)||new Date(n-21600000).toISOString().slice(0,16)!==values[i].slice(0,16))||dates[0]>=dates[1]||dates[1]>dates[2])throw problem(400,'El inicio debe ser anterior al cierre y el sorteo debe ser igual o posterior al cierre.');return dates;}
-const MAX_PER_PHONE=10,REVIEW_HOLD=48*3600000;
+const MAX_PER_PHONE=10,MAX_TICKETS=100000,REVIEW_HOLD=48*3600000;
 function paymentInfo(){const row=db.prepare("SELECT value FROM settings WHERE key='payment'").get();return row?JSON.parse(row.value):null;}
-function holdMs(){return (paymentInfo()?.holdHours||1)*3600000;}
+function holdMs(){return (paymentInfo()?.holdHours||24)*3600000;}
 function activeRaffle(){return db.prepare("SELECT id,prize,description,price_cents,ticket_count,starts_at,ends_at,draw_at,photo IS NOT NULL AS has_photo FROM raffles WHERE status='active' ORDER BY created DESC LIMIT 1").get();}
 function salesOpen(raffle,now=Date.now()){return !!raffle&&!!paymentInfo()&&now>=raffle.starts_at&&now<raffle.ends_at;}
 function closedMessage(raffle){if(!raffle)return 'No hay una rifa en venta en este momento.';if(!paymentInfo())return 'La venta abrirá en cuanto publiquemos los datos de pago.';return Date.now()<raffle.starts_at?'La venta de boletos aún no comienza.':'La venta de boletos ya cerró.';}
 function takenNumbers(raffleId){return db.prepare('SELECT number FROM raffle_tickets WHERE raffle=? ORDER BY number').all(raffleId).map(x=>x.number);}
+// One bit per ticket keeps the public availability payload small (about 17 KB for 100,000 tickets).
+function takenBitmap(raffle){const bits=Buffer.alloc(Math.ceil(raffle.ticket_count/8));for(const n of takenNumbers(raffle.id))bits[n>>3]|=1<<(n&7);return bits.toString('base64');}
+const money=cents=>new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(cents/100);
+// Sends a WhatsApp text through WAHA (WhatsApp HTTP API).
+async function sendWhatsApp(phone,text){
+const base=(process.env.WAHA_URL||'').replace(/\/+$/,''),session=process.env.WAHA_SESSION||'default';
+const headers={'Content-Type':'application/json',Accept:'application/json'};if(process.env.WAHA_API_KEY)headers['X-Api-Key']=process.env.WAHA_API_KEY;
+// Mexican mobiles can be registered on WhatsApp as 52 or 521 + 10 digits; WAHA reports the real chat id.
+let chatId=`52${phone}@c.us`;
+try{const check=await fetch(`${base}/api/contacts/check-exists?phone=52${phone}&session=${encodeURIComponent(session)}`,{headers,signal:AbortSignal.timeout(10000)});if(check.ok){const found=await check.json();if(found.numberExists===false)throw problem(404,'number_not_on_whatsapp');if(found.chatId)chatId=found.chatId;}}catch(error){if(error.status===404)throw error;}
+const res=await fetch(`${base}/api/sendText`,{method:'POST',headers,body:JSON.stringify({session,chatId,text}),signal:AbortSignal.timeout(15000)});if(!res.ok)throw problem(res.status,'waha_send_failed');
+}
+// Confirms an approved payment by WhatsApp (WAHA) and/or n8n. Failures are logged and never undo the approval.
+function notifyApproved(reservationId){
+const waha=!!process.env.WAHA_URL,hook=process.env.N8N_WEBHOOK_URL;if(!waha&&!hook)return;
+const r=db.prepare('SELECT r.id,r.name,r.phone,r.numbers,r.amount_cents,f.prize,f.ticket_count,f.draw_at FROM reservations r LEFT JOIN raffles f ON f.id=r.raffle WHERE r.id=?').get(reservationId);if(!r)return;
+const width=Math.max(3,String((r.ticket_count||1)-1).length),numbers=JSON.parse(r.numbers).map(n=>String(n).padStart(width,'0'));
+const payload={event:'payment_approved',folio:r.id,name:r.name,phone:r.phone,whatsapp:'52'+r.phone,numbers,amount:r.amount_cents?money(r.amount_cents):null,prize:r.prize,draw_at:r.draw_at?new Date(r.draw_at).toLocaleString('es-MX',{timeZone:'America/Mexico_City',dateStyle:'long',timeStyle:'short'}):null,lookup_url:`${origin}/#mis-boletos`};
+if(waha){const text=[`¡Hola, ${r.name}! 🎉 Confirmamos tu pago en Peso Ganador.`,'',payload.prize&&`Rifa: ${payload.prize}`,`Tus boletos: ${numbers.join(', ')}`,payload.amount&&`Total pagado: ${payload.amount} MXN`,`Folio: ${r.id}`,payload.draw_at&&`Sorteo: ${payload.draw_at}`,'',`Revisa que tus boletos ya aparecen como aprobados en ${payload.lookup_url} con tu folio y tu teléfono.`,'','¡Mucha suerte! 🍀'].filter(line=>line!==null&&line!==undefined).join('\n');
+sendWhatsApp(r.phone,text).then(()=>audit('whatsapp_sent',r.id)).catch(error=>{audit('whatsapp_failed',r.id);console.error('whatsapp_failed',error.message);});}
+if(hook){const headers={'Content-Type':'application/json'};if(process.env.N8N_WEBHOOK_SECRET)headers['X-Peso-Secret']=process.env.N8N_WEBHOOK_SECRET;
+fetch(hook,{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(10000)}).then(res=>{if(!res.ok)console.error('n8n_webhook_failed',res.status);}).catch(()=>console.error('n8n_webhook_failed'));}
+}
 function send(res,status,value){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));}
 function expire(){const now=Date.now();db.prepare("DELETE FROM raffle_tickets WHERE reservation IN (SELECT id FROM reservations WHERE status='pending' AND expires < ?)").run(now);db.prepare("DELETE FROM tickets WHERE reservation IN (SELECT id FROM reservations WHERE status='pending' AND expires < ?)").run(now);db.prepare("UPDATE reservations SET status='expired' WHERE status='pending' AND expires < ?").run(now);}
 function problem(status,message){return Object.assign(Error(message),{status});}
@@ -86,9 +109,14 @@ function token(req){return (req.headers.cookie||'').split(';').map(x=>x.trim()).
 function admin(req){const now=Date.now(),s=sessions.get(token(req));if(!s||s.expires<=now||s.last+900000<=now)return false;s.last=now;return true;}
 function cookie(value,age){return `${cookieName}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${age}${production||origin.startsWith('https:')?'; Secure':''}`;}
 function audit(event,id=null){db.prepare('INSERT INTO audit(event,reservation,created) VALUES(?,?,?)').run(event,id,Date.now());}
-// Global limits deliberately ignore forwarded IP headers: other containers must not spoof clients.
+// Behind Traefik (TRUST_PROXY=1) the last X-Forwarded-For entry is the one the proxy added; earlier entries come from the client.
+function clientIp(req){if(process.env.TRUST_PROXY==='1'){const chain=String(req.headers['x-forwarded-for']||'').split(',').map(x=>x.trim()).filter(Boolean);if(chain.length)return chain[chain.length-1];}return req.socket.remoteAddress||'unknown';}
+// Each public action has a generous site-wide ceiling plus a per-visitor limit, so one person cannot block everyone else.
+function limits(req,key,globalMax,perIpMax){limit(key,globalMax,60000);limit(`${key}:${clientIp(req)}`,perIpMax,60000);}
 function limit(key,max,window){const now=Date.now();db.prepare('DELETE FROM limits WHERE until<=?').run(now);db.prepare('INSERT INTO limits VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1').run(key,now+window);const a=db.prepare('SELECT count,until FROM limits WHERE key=?').get(key);if(a.count>max)throw Object.assign(problem(429,'Demasiadas solicitudes. Intenta más tarde.'),{retry:Math.ceil((a.until-now)/1000)});}
 setInterval(()=>{const now=Date.now();for(const [key,s] of sessions)if(s.expires<=now||s.last+900000<=now)sessions.delete(key);},60000).unref();
+// Expired holds are released once a minute and before every write, not on each page view.
+expire();setInterval(expire,60000).unref();
 const server=http.createServer({maxHeaderSize:16384,requestTimeout:30000,headersTimeout:10000},async(req,res)=>{
 res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','same-origin');res.setHeader('Cache-Control','no-store');res.setHeader('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
 res.setHeader('X-Frame-Options','DENY');res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');
@@ -99,13 +127,13 @@ if(!['GET','HEAD','POST'].includes(req.method)){res.setHeader('Allow','GET, HEAD
 if(req.method==='POST'){
 if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')return send(res,403,{error:'Origen no autorizado'});
 }
-expire();
-if(path==='/api/raffle'&&req.method==='GET'){const raffle=activeRaffle();if(!raffle)return send(res,200,{raffle:null,open:false,message:closedMessage(null),taken:[]});return send(res,200,{raffle,open:salesOpen(raffle),message:salesOpen(raffle)?null:closedMessage(raffle),holdHours:holdMs()/3600000,maxPerPhone:MAX_PER_PHONE,taken:takenNumbers(raffle.id)});}
+if(req.method==='POST'||path.startsWith('/api/admin/'))expire();
+if(path==='/api/raffle'&&req.method==='GET'){const raffle=activeRaffle();if(!raffle)return send(res,200,{raffle:null,open:false,message:closedMessage(null),taken:''});return send(res,200,{raffle,open:salesOpen(raffle),message:salesOpen(raffle)?null:closedMessage(raffle),holdHours:holdMs()/3600000,maxPerPhone:MAX_PER_PHONE,taken:takenBitmap(raffle)});}
 if(path==='/api/payment-info'&&req.method==='GET')return send(res,200,paymentInfo());
 const publicPhoto=path.match(/^\/api\/raffles\/([a-f0-9]{24})\/photo$/);
 if(publicPhoto&&['GET','HEAD'].includes(req.method)){const row=db.prepare("SELECT photo,photo_type FROM raffles WHERE id=? AND status IN ('active','closed')").get(publicPhoto[1]);if(!row?.photo)return send(res,404,{error:'Foto no disponible'});res.setHeader('Content-Type',row.photo_type);return res.end(req.method==='HEAD'?undefined:Buffer.from(row.photo));}
 if(path==='/api/payments/submit'&&req.method==='POST'){
-limit('payment_submit',15,60000);const b=await body(req,Math.ceil(RECEIPT_MAX/3)*4+4096);
+limits(req,'payment_submit',300,10);const b=await body(req,Math.ceil(RECEIPT_MAX/3)*4+4096);
 if(typeof b.folio!=='string'||!/^[a-f0-9]{24}$/i.test(b.folio.trim())||typeof b.phone!=='string'||!/^\d{10}$/.test(b.phone)||typeof b.tracking!=='string'||b.tracking.length>100)return send(res,400,{error:'Revisa folio, teléfono y clave de rastreo.'});
 const row=db.prepare('SELECT id,status,expires FROM reservations WHERE id=? AND phone=?').get(b.folio.trim().toLowerCase(),b.phone);
 if(!row)return send(res,404,{error:'No encontramos una coincidencia con esos datos y folio.'});
@@ -122,7 +150,7 @@ catch(error){db.exec('ROLLBACK');if(String(error.code).includes('CONSTRAINT')||S
 return send(res,201,{id,status:'pending',message:'¡Comprobante recibido! Tus boletos quedan apartados mientras revisamos tu pago. Consulta el estado con tu folio.'});
 }
 if(path==='/api/tickets/random'&&req.method==='POST'){
-limit('random_tickets',60,60000);const b=await body(req);
+limits(req,'random_tickets',1200,60);const b=await body(req);
 if(!Number.isInteger(b.quantity)||b.quantity<1||b.quantity>MAX_PER_PHONE)return send(res,400,{error:`Elige entre 1 y ${MAX_PER_PHONE} boletos.`});
 const raffle=activeRaffle();if(!salesOpen(raffle))return send(res,409,{error:closedMessage(raffle)});
 const taken=new Set(takenNumbers(raffle.id));
@@ -132,7 +160,7 @@ for(let i=0;i<b.quantity;i++){const j=randomInt(i,available.length);[available[i
 return send(res,200,{numbers:available.slice(0,b.quantity),quantity:b.quantity});
 }
 if(path==='/api/tickets/lookup'&&req.method==='POST'){
-limit('ticket_lookup',30,60000);
+limits(req,'ticket_lookup',600,20);
 const b=await body(req);
 if(!['name','phone','email'].includes(b.method)||typeof b.value!=='string'||!b.value.trim()||b.value.length>254||typeof b.folio!=='string'||!/^[a-f0-9]{24}$/i.test(b.folio.trim()))return send(res,400,{error:'Selecciona un dato de registro e introduce tu folio de 24 caracteres.'});
 const row=db.prepare('SELECT r.id,r.name,r.phone,r.email,r.numbers,r.status,r.created,r.expires,r.amount_cents,f.prize,f.ticket_count,f.draw_at FROM reservations r LEFT JOIN raffles f ON f.id=r.raffle WHERE r.id=?').get(b.folio.trim().toLowerCase());
@@ -142,7 +170,7 @@ const payment=db.prepare('SELECT status,reason FROM payment_submissions WHERE re
 return send(res,200,{folio:row.id,numbers:JSON.parse(row.numbers),status:row.status,created:row.created,expires:row.expires,amount_cents:row.amount_cents,prize:row.prize,ticket_count:row.ticket_count,draw_at:row.draw_at,payment:payment||null});
 }
 if(path==='/api/reservations'&&req.method==='POST'){
-limit('reservations',30,60000);
+limits(req,'reservations',600,20);
 const b=await body(req);if(!Array.isArray(b.numbers)||b.numbers.length>MAX_PER_PHONE)return send(res,400,{error:`Selecciona de 1 a ${MAX_PER_PHONE} boletos`});const nums=[...new Set(b.numbers)];
 const raffle=activeRaffle();if(!salesOpen(raffle))return send(res,409,{error:closedMessage(raffle)});
 if(typeof b.name!=='string'||b.name.trim().length<3||b.name.length>100||typeof b.phone!=='string'||!/^\d{10}$/.test(b.phone)||!nums.length||nums.length>MAX_PER_PHONE||nums.some(n=>!Number.isInteger(n)||n<0||n>=raffle.ticket_count))return send(res,400,{error:`Revisa nombre, teléfono y boletos (máximo ${MAX_PER_PHONE}).`});
@@ -189,12 +217,12 @@ db.exec('BEGIN IMMEDIATE');try{const p=db.prepare('SELECT * FROM payment_submiss
 if(b.decision==='approved'){const changed=db.prepare("UPDATE reservations SET status='paid' WHERE id=? AND status='pending' AND expires>=?").run(p.reservation,Date.now());if(!changed.changes){db.exec('ROLLBACK');return send(res,409,{error:'El apartado venció o ya fue procesado. No se reasignaron boletos; requiere aclaración.'});}}
 // A rejected receipt gives the participant the normal payment window again instead of the review hold.
 else db.prepare("UPDATE reservations SET expires=MIN(expires,?) WHERE id=? AND status='pending'").run(Date.now()+holdMs(),p.reservation);
-db.prepare('UPDATE payment_submissions SET status=?,reason=?,reviewed=? WHERE id=?').run(b.decision,b.reason.trim(),Date.now(),p.id);audit(b.decision==='approved'?'payment_confirmed':'payment_rejected',p.reservation);db.exec('COMMIT');return send(res,200,{ok:true});}catch(error){db.exec('ROLLBACK');throw error;}
+db.prepare('UPDATE payment_submissions SET status=?,reason=?,reviewed=? WHERE id=?').run(b.decision,b.reason.trim(),Date.now(),p.id);audit(b.decision==='approved'?'payment_confirmed':'payment_rejected',p.reservation);db.exec('COMMIT');if(b.decision==='approved')notifyApproved(p.reservation);return send(res,200,{ok:true});}catch(error){db.exec('ROLLBACK');throw error;}
 }
 if(path==='/api/admin/raffles'&&req.method==='GET')return send(res,200,db.prepare("SELECT f.id,f.prize,f.description,f.price_cents,f.ticket_count,f.status,f.created,f.starts_at,f.ends_at,f.draw_at,f.photo IS NOT NULL AS has_photo,(SELECT COUNT(*) FROM raffle_tickets t JOIN reservations r ON r.id=t.reservation WHERE t.raffle=f.id AND r.status='paid') AS sold,(SELECT COUNT(*) FROM raffle_tickets t JOIN reservations r ON r.id=t.reservation WHERE t.raffle=f.id AND r.status='pending') AS held FROM raffles f ORDER BY f.created DESC,f.id DESC LIMIT 100").all());
 if(path==='/api/admin/raffles'&&req.method==='POST'){
 limit('create_raffle',10,60000);const b=await body(req,1500000);
-if(typeof b.prize!=='string'||b.prize.trim().length<3||b.prize.length>120||typeof b.description!=='string'||!b.description.trim()||b.description.length>5000||typeof b.price!=='string'||!/^\d{1,7}(?:\.\d{1,2})?$/.test(b.price)||!Number.isInteger(b.ticketCount)||b.ticketCount<1||b.ticketCount>10000)return send(res,400,{error:'Revisa premio, descripción, precio y cantidad (1 a 10,000 boletos).'});
+if(typeof b.prize!=='string'||b.prize.trim().length<3||b.prize.length>120||typeof b.description!=='string'||!b.description.trim()||b.description.length>5000||typeof b.price!=='string'||!/^\d{1,7}(?:\.\d{1,2})?$/.test(b.price)||!Number.isInteger(b.ticketCount)||b.ticketCount<1||b.ticketCount>MAX_TICKETS)return send(res,400,{error:'Revisa premio, descripción, precio y cantidad (1 a 100,000 boletos).'});
 const cents=Math.round(Number(b.price)*100);if(cents<1||cents>100000000)return send(res,400,{error:'El precio debe estar entre $0.01 y $1,000,000 MXN.'});
 const dates=raffleDates(b),photo=rafflePhoto(b.photo),id=randomBytes(12).toString('hex');db.exec('BEGIN IMMEDIATE');try{db.prepare("INSERT INTO raffles(id,prize,description,price_cents,ticket_count,status,photo,photo_type,created,starts_at,ends_at,draw_at) VALUES(?,?,?,?,?,'draft',?,?,?,?,?,?)").run(id,b.prize.trim(),b.description.trim(),cents,b.ticketCount,photo.bytes,photo.type,Date.now(),...dates);audit('raffle_created',id);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}return send(res,201,{id,status:'draft',message:'Rifa guardada como borrador. Pulsa «Poner en venta» cuando quieras publicarla.'});
 }
