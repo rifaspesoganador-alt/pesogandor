@@ -1,6 +1,6 @@
 FROM node:24-alpine
 WORKDIR /app
-COPY --chown=node:node package.json server.mjs credentials.mjs reset-admin-password.mjs ./
+COPY --chown=node:node package.json server.mjs credentials.mjs reset-admin-password.mjs borrar-datos-demo.mjs ./
 COPY --chown=node:node public ./public
 RUN mkdir data && chown node:node data
 USER node

@@ -1,6 +1,6 @@
 # Seguridad y alcance
 
-Esta aplicación sigue siendo una demostración. No hay una auditoría independiente ni garantía de seguridad absoluta.
+No hay una auditoría independiente ni garantía de seguridad absoluta. Los pagos se validan manualmente: aprueba un comprobante solo después de ver el depósito en tu banca en línea.
 
 ## Controles implementados
 
