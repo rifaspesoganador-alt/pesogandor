@@ -7,7 +7,7 @@ import {join,resolve} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 const mx=ms=>new Date(ms-21600000).toISOString().slice(0,16)+':00-06:00';
 const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1sAAAAASUVORK5CYII=';
-const bank={bank:'Banco Uno',holder:'Titular de Pruebas',clabe:'012345678901234567',account:'',card:'',whatsapp:'',instructions:'Escribe tu folio en el concepto.',holdHours:1};
+const bank={bank:'Banco Uno',holder:'Titular de Pruebas',clabe:'012345678901234567',account:'',card:'',whatsapp:'',instructions:'También aceptamos depósito en OXXO.',holdHours:1};
 // Saves payment details, creates a raffle whose sale window includes now and puts it on sale.
 async function openSale(base,cookie,{ticketCount=100,price='50'}={}){
 const post=(path,data)=>fetch(base+path,{method:'POST',headers:{Origin:base,'Content-Type':'application/json',Cookie:cookie},body:JSON.stringify(data)});
@@ -39,23 +39,29 @@ assert.equal((await post('/api/reservations',{name:'Test User',phone:'5512345678
 assert.equal((await post('/api/reservations',{name:'Test User',phone:'5512345678',numbers:[100]})).status,400);
 const data={name:'Test User',phone:'5512345678',email:'TEST@example.com',numbers:[5]};const responses=await Promise.all([post('/api/reservations',data),post('/api/reservations',data)]);assert.deepEqual(responses.map(x=>x.status).sort(),[201,409]);
 const reservation=await responses.find(x=>x.status===201).json();assert.equal(reservation.amount_cents,5000);
-const lookup=(method,value,folio=reservation.id)=>post('/api/tickets/lookup',{method,value,folio});
+assert.equal(Object.hasOwn(reservation,'id'),false);assert.deepEqual(reservation.numbers,[5]);
+const lookup=(method,value)=>post('/api/tickets/lookup',{method,value});
 assert.equal((await fetch(base+'/api/tickets/lookup')).status,404);
-assert.equal((await post('/api/tickets/lookup',{method:'phone',value:data.phone})).status,400);
+assert.equal((await post('/api/tickets/lookup',{method:'folio',value:'x'})).status,400);assert.equal((await lookup('phone','55123')).status,400);
 assert.equal((await lookup('phone',data.phone)).status,200);
-const pending=await (await lookup('phone',data.phone)).json();assert.equal(pending.status,'pending');assert.equal(pending.prize,'Premio');assert.equal(pending.amount_cents,5000);
+const pending=(await (await lookup('phone',data.phone)).json()).results;assert.equal(pending.length,1);assert.equal(pending[0].status,'pending');assert.equal(pending[0].prize,'Premio');assert.equal(pending[0].amount_cents,5000);
 assert.equal((await lookup('name',' test   USER ')).status,200);
 assert.equal((await lookup('email',' Test@Example.COM ')).status,200);
-const wrong=await lookup('phone','5599999999');const absent=await lookup('phone',data.phone,'0'.repeat(24));assert.equal(wrong.status,404);assert.equal(absent.status,404);assert.deepEqual(await wrong.json(),await absent.json());
-assert.equal((await post('/api/tickets/lookup',{method:'phone',value:data.phone,folio:reservation.id},{Origin:'https://evil.example'})).status,403);
+assert.equal((await lookup('phone','5599999999')).status,404);assert.equal((await lookup('name','Otra Persona')).status,404);
+assert.equal((await post('/api/tickets/lookup',{method:'phone',value:data.phone},{Origin:'https://evil.example'})).status,403);
 assert.equal((await post('/api/reservations',{...data,numbers:[6],email:123})).status,400);
-assert.equal((await post('/api/admin/confirm',{id:reservation.id},{Cookie:cookie})).status,410);
+// A second reservation from the same phone joins the pending one and the total grows.
+const more=await (await post('/api/reservations',{...data,numbers:[6]})).json();assert.deepEqual(more.numbers,[5,6]);assert.equal(more.amount_cents,10000);assert.equal((await (await lookup('phone',data.phone)).json()).results.length,1);
+assert.equal((await post('/api/admin/confirm',{id:'x'},{Cookie:cookie})).status,410);
 const receipt={type:'image/png',base64:png};
-const submitted=await post('/api/payments/submit',{folio:reservation.id,phone:data.phone,tracking:'MBAN0123456',receipt});assert.equal(submitted.status,201);const payment=await submitted.json();
+assert.equal((await post('/api/payments/submit',{phone:'5599999999',tracking:'MBAN0123456',receipt})).status,404);
+const submitted=await post('/api/payments/submit',{phone:data.phone,tracking:'MBAN0123456',receipt});assert.equal(submitted.status,201);const payment=await submitted.json();
+assert.equal((await post('/api/reservations',{...data,numbers:[7]})).status,409);
 assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'approved',reason:'Depósito verificado'},{Cookie:cookie})).status,200);
 assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'approved',reason:'Reintento'},{Cookie:cookie})).status,409);
-const paid=await (await lookup('email','test@example.com')).json();assert.equal(paid.status,'paid');assert.deepEqual(paid.numbers,[5]);for(const key of ['name','phone','email','password','demo'])assert.equal(Object.hasOwn(paid,key),false);
-const raffles=await (await fetch(base+'/api/admin/raffles',{headers:{Cookie:cookie}})).json();assert.equal(raffles[0].sold,1);
+assert.equal((await post('/api/payments/submit',{phone:data.phone,tracking:'MBAN0999999',receipt})).status,409);
+const paid=(await (await lookup('email','test@example.com')).json()).results[0];assert.equal(paid.status,'paid');assert.deepEqual(paid.numbers,[5,6]);for(const key of ['id','folio','name','phone','email','password','demo'])assert.equal(Object.hasOwn(paid,key),false);
+const raffles=await (await fetch(base+'/api/admin/raffles',{headers:{Cookie:cookie}})).json();assert.equal(raffles[0].sold,2);
 const records=await (await fetch(base+'/api/admin/reservations',{headers:{Cookie:cookie}})).json();assert.equal(records[0].status,'paid');assert.equal(records[0].prize,'Premio');
 assert.equal((await post('/api/admin/confirm',{id:{}},{Cookie:cookie})).status,410);
 assert.equal((await post('/api/admin/logout',{}, {Cookie:cookie,Origin:'https://evil.example'})).status,403);
@@ -77,8 +83,8 @@ db.exec("CREATE TABLE raffles(id TEXT PRIMARY KEY,prize TEXT NOT NULL,descriptio
 const id='a'.repeat(24);db.prepare('INSERT INTO reservations VALUES(?,?,?,?,?,?,?)').run(id,'Legacy User','5512345678','[8]','pending',1,2);db.prepare('INSERT INTO tickets VALUES(?,?)').run(8,id);db.close();
 const proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env:{...process.env,PORT:'3099',NODE_ENV:'test',PUBLIC_ORIGIN:'http://localhost:3099'}});
 try{await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});
-const lookup=(method,value)=>fetch('http://localhost:3099/api/tickets/lookup',{method:'POST',headers:{Origin:'http://localhost:3099','Content-Type':'application/json'},body:JSON.stringify({method,value,folio:id})});
-const r=await lookup('phone','5512345678');assert.equal(r.status,200);assert.equal((await r.json()).status,'expired');assert.equal((await lookup('name','Legacy User')).status,200);assert.equal((await lookup('email','none@example.com')).status,404);
+const lookup=(method,value)=>fetch('http://localhost:3099/api/tickets/lookup',{method:'POST',headers:{Origin:'http://localhost:3099','Content-Type':'application/json'},body:JSON.stringify({method,value})});
+const r=await lookup('phone','5512345678');assert.equal(r.status,200);assert.equal((await r.json()).results[0].status,'expired');assert.equal((await lookup('name','Legacy User')).status,200);assert.equal((await lookup('email','none@example.com')).status,404);
 const raffle=await (await fetch('http://localhost:3099/api/raffle')).json();assert.equal(raffle.raffle,null);assert.equal(raffle.open,false);
 const check=new DatabaseSync(join(dir,'data/peso.db'));assert.equal(check.prepare('SELECT status FROM raffles').get().status,'draft');check.close();
 }finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;rmSync(dir,{recursive:true,force:true});}
@@ -168,24 +174,25 @@ const post=(path,data,cookie='')=>fetch(base+path,{method:'POST',headers:{Origin
 const receipt={type:'image/png',base64:png};
 try{await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});
 const cookie=await adminCookie(base,'test-receipt-password');await openSale(base,cookie);
-const reserved=await (await post('/api/reservations',{name:'Receipt Test',phone:'5512345678',numbers:[2]})).json();const payload={folio:reserved.id,phone:'5512345678',tracking:'TEST123456',receipt};
+assert.equal((await post('/api/reservations',{name:'Receipt Test',phone:'5512345678',numbers:[2]})).status,201);const payload={phone:'5512345678',tracking:'TEST123456',receipt};
 assert.equal((await post('/api/payments/submit',{...payload,phone:'5500000000'})).status,404);assert.equal((await post('/api/payments/submit',{...payload,receipt:null})).status,400);
 assert.equal((await post('/api/payments/submit',{...payload,receipt:{type:'application/pdf',base64:Buffer.from('not a pdf at all, nope').toString('base64')}})).status,400);
 const created=await post('/api/payments/submit',payload);assert.equal(created.status,201);const payment=await created.json();assert.equal((await post('/api/payments/submit',payload)).status,409);
-let db=new DatabaseSync(join(dir,'data/peso.db'));assert.ok(db.prepare('SELECT expires FROM reservations WHERE id=?').get(reserved.id).expires>Date.now()+40*3600000);db.close();
+let db=new DatabaseSync(join(dir,'data/peso.db'));assert.ok(db.prepare('SELECT expires FROM reservations WHERE phone=?').get('5512345678').expires>Date.now()+40*3600000);db.close();
 assert.equal((await fetch(base+`/api/admin/payments/${payment.id}/receipt`)).status,401);
 assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'approved',reason:'Test reason'})).status,401);
 const receiptResponse=await fetch(base+`/api/admin/payments/${payment.id}/receipt`,{headers:{Cookie:cookie}});assert.equal(receiptResponse.status,200);assert.equal(receiptResponse.headers.get('content-type'),'image/png');
 const listed=await (await fetch(base+'/api/admin/payments',{headers:{Cookie:cookie}})).json();assert.equal(listed[0].amount_cents,5000);assert.equal(Object.hasOwn(listed[0],'receipt'),false);
-db=new DatabaseSync(join(dir,'data/peso.db'));db.prepare('UPDATE reservations SET expires=1 WHERE id=?').run(reserved.id);db.close();
+db=new DatabaseSync(join(dir,'data/peso.db'));db.prepare('UPDATE reservations SET expires=1 WHERE phone=?').run('5512345678');db.close();
 assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'approved',reason:'Test reason'},cookie)).status,409);
 const raffle=await (await fetch(base+'/api/raffle')).json();assert.equal(isTaken(raffle,2),0);
 assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'rejected',reason:'Apartado vencido, aclarar pago'},cookie)).status,200);
-const lookup=await (await post('/api/tickets/lookup',{folio:reserved.id,method:'phone',value:'5512345678'})).json();assert.equal(lookup.payment.status,'rejected');assert.equal(lookup.status,'expired');assert.equal(Object.hasOwn(lookup.payment,'receipt'),false);
-const other=await (await post('/api/reservations',{name:'Pdf Test',phone:'5512345670',numbers:[3]})).json();
-const pdf=await post('/api/payments/submit',{folio:other.id,phone:'5512345670',tracking:'PDF1234567',receipt:{type:'application/pdf',base64:Buffer.from('%PDF-1.4\n%%EOF placeholder').toString('base64')}});assert.equal(pdf.status,201);const pdfPayment=await pdf.json();
+const lookup=(await (await post('/api/tickets/lookup',{method:'phone',value:'5512345678'})).json()).results[0];assert.equal(lookup.payment.status,'rejected');assert.equal(lookup.status,'expired');assert.equal(Object.hasOwn(lookup.payment,'receipt'),false);
+assert.equal((await post('/api/payments/submit',{...payload,tracking:'LATE123456'})).status,404);
+assert.equal((await post('/api/reservations',{name:'Pdf Test',phone:'5512345670',numbers:[3]})).status,201);
+const pdf=await post('/api/payments/submit',{phone:'5512345670',tracking:'PDF1234567',receipt:{type:'application/pdf',base64:Buffer.from('%PDF-1.4\n%%EOF placeholder').toString('base64')}});assert.equal(pdf.status,201);const pdfPayment=await pdf.json();
 assert.equal((await post('/api/admin/payments/review',{id:pdfPayment.id,decision:'rejected',reason:'Monto incompleto'},cookie)).status,200);
-db=new DatabaseSync(join(dir,'data/peso.db'));const back=db.prepare('SELECT status,expires FROM reservations WHERE id=?').get(other.id);db.close();assert.equal(back.status,'pending');assert.ok(back.expires<=Date.now()+3600000);
+db=new DatabaseSync(join(dir,'data/peso.db'));const back=db.prepare('SELECT status,expires FROM reservations WHERE phone=?').get('5512345670');db.close();assert.equal(back.status,'pending');assert.ok(back.expires<=Date.now()+3600000);
 }finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -196,14 +203,14 @@ const dir=mkdtempSync(join(tmpdir(),'peso-n8n-'));const base='http://localhost:3
 const post=(path,data,cookie='')=>fetch(base+path,{method:'POST',headers:{Origin:base,'Content-Type':'application/json',Cookie:cookie},body:JSON.stringify(data)});
 try{await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});
 const cookie=await adminCookie(base,'n8n-test-password');await openSale(base,cookie,{ticketCount:100000});
-const reserved=await (await post('/api/reservations',{name:'Ana Pérez',phone:'5512345678',numbers:[7,99999]})).json();
+assert.equal((await post('/api/reservations',{name:'Ana Pérez',phone:'5512345678',numbers:[7,99999]})).status,201);
 const raffle=await (await fetch(base+'/api/raffle')).json();assert.equal(Buffer.from(raffle.taken,'base64').length,12500);assert.equal(isTaken(raffle,7),1);assert.equal(isTaken(raffle,99999),1);assert.equal(isTaken(raffle,8),0);assert.equal(raffle.holdHours,1);
-const payment=await (await post('/api/payments/submit',{folio:reserved.id,phone:'5512345678',tracking:'HOOK123456',receipt:{type:'image/png',base64:png}})).json();
+const payment=await (await post('/api/payments/submit',{phone:'5512345678',tracking:'HOOK123456',receipt:{type:'image/png',base64:png}})).json();
 assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'approved',reason:'Depósito verificado'},cookie)).status,200);
 for(let i=0;i<50&&(!calls.length||waha.length<2);i++)await new Promise(r=>setTimeout(r,100));
 assert.deepEqual(waha.map(x=>x.path),['/api/contacts/check-exists','/api/sendText']);assert.equal(waha[0].phone,'525512345678');assert.equal(waha[0].session,'peso');assert.ok(waha.every(x=>x.key==='waha-key'));
-const message=waha[1].body;assert.equal(message.session,'peso');assert.equal(message.chatId,'5215512345678@c.us');assert.match(message.text,/Ana Pérez/);assert.match(message.text,/00007, 99999/);assert.match(message.text,/#mis-boletos/);
-assert.equal(calls.length,1);assert.equal(calls[0].secret,'hook-secret');const sent=calls[0].body;assert.equal(sent.event,'payment_approved');assert.equal(sent.folio,reserved.id);assert.equal(sent.whatsapp,'525512345678');assert.deepEqual(sent.numbers,['00007','99999']);assert.equal(sent.name,'Ana Pérez');assert.match(sent.lookup_url,/#mis-boletos$/);
+const message=waha[1].body;assert.equal(message.session,'peso');assert.equal(message.chatId,'5215512345678@c.us');assert.match(message.text,/Ana Pérez/);assert.match(message.text,/00007, 99999/);assert.match(message.text,/#mis-boletos/);assert.doesNotMatch(message.text,/folio/i);
+assert.equal(calls.length,1);assert.equal(calls[0].secret,'hook-secret');const sent=calls[0].body;assert.equal(sent.event,'payment_approved');assert.equal(Object.hasOwn(sent,'folio'),false);assert.equal(sent.whatsapp,'525512345678');assert.deepEqual(sent.numbers,['00007','99999']);assert.equal(sent.name,'Ana Pérez');assert.match(sent.lookup_url,/#mis-boletos$/);
 }finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;hook.close();rmSync(dir,{recursive:true,force:true});}
 });
 
