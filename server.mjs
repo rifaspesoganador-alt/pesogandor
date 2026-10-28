@@ -93,6 +93,8 @@ if(!width||!height||width>maxSide||height>maxSide)throw problem(400,`La ${label}
 return {bytes,type:photo.type};
 }
 const RECEIPT_MAX=5242880;
+// Prize photos: the panel already shrinks them to 2000 px JPEG; the server still accepts up to 5 MB and 8000 px.
+const PRIZE_PHOTO={maxBytes:5242880,maxSide:8000},PRIZE_BODY=Math.ceil(PRIZE_PHOTO.maxBytes/3)*4+16384;
 function receiptFile(file){
 if(file?.type!=='application/pdf')return rafflePhoto(file,{maxBytes:RECEIPT_MAX,maxSide:12000,label:'imagen'});
 if(typeof file.base64!=='string'||file.base64.length>Math.ceil(RECEIPT_MAX/3)*4||!/^[A-Za-z0-9+/]*={0,2}$/.test(file.base64))throw problem(400,'Usa un PDF de máximo 5 MB.');
@@ -237,8 +239,8 @@ else db.prepare("UPDATE reservations SET expires=MIN(expires,?) WHERE id=? AND s
 db.prepare('UPDATE payment_submissions SET status=?,reason=?,reviewed=? WHERE id=?').run(b.decision,b.reason.trim(),Date.now(),p.id);audit(b.decision==='approved'?'payment_confirmed':'payment_rejected',p.reservation);db.exec('COMMIT');if(b.decision==='approved')notifyApproved(p.reservation);return send(res,200,{ok:true});}catch(error){db.exec('ROLLBACK');throw error;}
 }
 if(path==='/api/admin/raffles/update'&&req.method==='POST'){
-const b=await body(req,1500000);if(typeof b.id!=='string'||!/^[a-f0-9]{24}$/.test(b.id))return send(res,400,{error:'Rifa inválida'});
-const fields=raffleFields(b),dates=raffleDates(b),photo=b.photo===undefined?undefined:rafflePhoto(b.photo);
+const b=await body(req,PRIZE_BODY);if(typeof b.id!=='string'||!/^[a-f0-9]{24}$/.test(b.id))return send(res,400,{error:'Rifa inválida'});
+const fields=raffleFields(b),dates=raffleDates(b),photo=b.photo===undefined?undefined:rafflePhoto(b.photo,PRIZE_PHOTO);
 db.exec('BEGIN IMMEDIATE');try{const raffle=db.prepare('SELECT price_cents FROM raffles WHERE id=?').get(b.id);const fail=(status,error)=>{db.exec('ROLLBACK');return send(res,status,{error});};
 if(!raffle)return fail(404,'Rifa no disponible');
 // Once tickets are held or sold, their price is fixed and no sold number may fall outside the raffle.
@@ -265,8 +267,8 @@ db.prepare('UPDATE raffles SET ends_at=?,draw_at=?,rescheduled=COALESCE(reschedu
 return send(res,200,{ok:true,status:reopen?'active':raffle.status,message:reopen?'Rifa reprogramada y de nuevo en venta.':raffle.status==='closed'?'Rifa reprogramada. Sigue con ventas cerradas porque hay otra rifa en venta.':'Rifa reprogramada.'});}catch(error){db.exec('ROLLBACK');throw error;}}
 if(path==='/api/admin/raffles'&&req.method==='GET')return send(res,200,db.prepare("SELECT f.id,f.prize,f.description,f.price_cents,f.ticket_count,f.status,f.created,f.starts_at,f.ends_at,f.draw_at,COALESCE(f.goal_percent,80) AS goal_percent,COALESCE(f.rescheduled,0) AS rescheduled,f.photo IS NOT NULL AS has_photo,(SELECT COUNT(*) FROM raffle_tickets t JOIN reservations r ON r.id=t.reservation WHERE t.raffle=f.id AND r.status='paid') AS sold,(SELECT COUNT(*) FROM raffle_tickets t JOIN reservations r ON r.id=t.reservation WHERE t.raffle=f.id AND r.status='pending') AS held FROM raffles f ORDER BY f.created DESC,f.id DESC LIMIT 100").all());
 if(path==='/api/admin/raffles'&&req.method==='POST'){
-limit('create_raffle',10,60000);const b=await body(req,1500000);
-const fields=raffleFields(b),dates=raffleDates(b),photo=rafflePhoto(b.photo),id=randomBytes(12).toString('hex');db.exec('BEGIN IMMEDIATE');try{db.prepare("INSERT INTO raffles(id,prize,description,price_cents,ticket_count,status,photo,photo_type,created,starts_at,ends_at,draw_at,goal_percent) VALUES(?,?,?,?,?,'draft',?,?,?,?,?,?,?)").run(id,fields.prize,fields.description,fields.cents,fields.ticketCount,photo.bytes,photo.type,Date.now(),...dates,fields.goal);audit('raffle_created',id);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}return send(res,201,{id,status:'draft',message:'Rifa guardada como borrador. Pulsa «Poner en venta» cuando quieras publicarla.'});
+limit('create_raffle',10,60000);const b=await body(req,PRIZE_BODY);
+const fields=raffleFields(b),dates=raffleDates(b),photo=rafflePhoto(b.photo,PRIZE_PHOTO),id=randomBytes(12).toString('hex');db.exec('BEGIN IMMEDIATE');try{db.prepare("INSERT INTO raffles(id,prize,description,price_cents,ticket_count,status,photo,photo_type,created,starts_at,ends_at,draw_at,goal_percent) VALUES(?,?,?,?,?,'draft',?,?,?,?,?,?,?)").run(id,fields.prize,fields.description,fields.cents,fields.ticketCount,photo.bytes,photo.type,Date.now(),...dates,fields.goal);audit('raffle_created',id);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}return send(res,201,{id,status:'draft',message:'Rifa guardada como borrador. Pulsa «Poner en venta» cuando quieras publicarla.'});
 }
 const photoMatch=path.match(/^\/api\/admin\/raffles\/([a-f0-9]{24})\/photo$/);
 if(photoMatch&&['GET','HEAD'].includes(req.method)){const row=db.prepare('SELECT photo,photo_type FROM raffles WHERE id=?').get(photoMatch[1]);if(!row?.photo)return send(res,404,{error:'Foto no disponible'});res.setHeader('Content-Type',row.photo_type);res.setHeader('Content-Length',row.photo.length);res.setHeader('Content-Disposition','inline');return res.end(req.method==='HEAD'?undefined:Buffer.from(row.photo));}
