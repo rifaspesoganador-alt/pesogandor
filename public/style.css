@@ -43,6 +43,39 @@ body.has-selection{padding-bottom:96px}
 @media(min-width:1000px){.selection-bar{left:calc(50% + 118px);width:min(760px,calc(100% - 268px))}}
 @media(max-width:600px){.selection-bar{bottom:10px;width:calc(100% - 20px);gap:10px;padding:10px 10px 10px 16px}.selection-bar-info strong{font-size:13px}.selection-bar .outline{padding:10px 12px}}
 
+/* Tarjeta de la rifa en curso: el premio al centro y las cantidades destacadas. */
+.raffle-hero{position:relative;isolation:isolate;overflow:hidden;margin:0 0 56px;padding:44px 28px 38px;border:1px solid #c9ae6955;border-radius:22px;text-align:center;font-size:inherit;background:radial-gradient(ellipse at 50% 0,#c5f85b1f,transparent 60%),radial-gradient(ellipse at 50% 120%,#e8c77714,transparent 60%),#0e160d;box-shadow:0 30px 80px #0006,inset 0 1px 0 #e9d69c22}
+.raffle-hero:before{content:'';position:absolute;top:-1px;left:50%;width:220px;height:1px;transform:translateX(-50%);background:linear-gradient(90deg,transparent,#e8c777cc,transparent);box-shadow:0 0 14px #e8c77755}
+.raffle-badge{display:inline-flex;align-items:center;gap:9px;margin:0 0 24px;padding:7px 15px;border:1px solid #c5f85b44;border-radius:30px}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--lime);animation:live 1.6s infinite}
+@keyframes live{0%{box-shadow:0 0 0 0 #c5f85b99}70%,100%{box-shadow:0 0 0 9px #c5f85b00}}
+.raffle-photo{display:block;width:100%;max-height:380px;margin:0 0 30px;border-radius:16px;object-fit:cover}
+.raffle-prize{margin:0 auto 14px;font:italic 400 clamp(54px,9vw,128px)/1.02 var(--serif);letter-spacing:-3px;background:linear-gradient(100deg,#eefbd4 0%,var(--lime) 42%,#e8c777 85%);-webkit-background-clip:text;background-clip:text;color:transparent;overflow-wrap:anywhere}
+.raffle-desc{max-width:660px;margin:0 auto 32px;font-size:18px;line-height:1.7;color:#d8e3cb;white-space:pre-wrap;overflow-wrap:anywhere}
+.raffle-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;max-width:780px;margin:0 auto 26px}
+.raffle-stats div{padding:20px 12px;border:1px solid var(--line);border-radius:16px;background:#ffffff06}
+.raffle-stats span{display:block;margin-bottom:10px;font-size:10px;letter-spacing:1.6px;text-transform:uppercase;color:var(--muted)}
+.raffle-stats strong{display:block;font-size:clamp(28px,4.2vw,48px);font-weight:700;letter-spacing:-1px;line-height:1;font-variant-numeric:tabular-nums}
+.raffle-stats .gold strong{color:#e8c777}.raffle-stats .lime strong{color:var(--lime)}.raffle-stats small{font-size:13px;font-weight:600;letter-spacing:0;color:var(--muted)}
+.raffle-progress{max-width:780px;height:10px;margin:0 auto 10px;border-radius:10px;background:#ffffff0f;overflow:hidden}
+.raffle-progress i{display:block;width:0;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--lime),#e8c777);transition:width 1.2s cubic-bezier(.2,.8,.2,1)}
+.raffle-progress-label{margin:0 0 30px;font-size:12px;color:var(--muted)}
+.raffle-countdown-label{margin:0 0 12px;font-size:11px;font-weight:600;letter-spacing:1.8px;text-transform:uppercase;color:#e8c777}
+.raffle-countdown{display:flex;justify-content:center;gap:10px}
+.raffle-countdown div{min-width:74px;padding:13px 8px;border:1px solid #c5f85b30;border-radius:14px;background:#c5f85b10}
+.raffle-countdown b{display:block;font-size:32px;font-weight:700;line-height:1.1;color:var(--lime);font-variant-numeric:tabular-nums}
+.raffle-countdown span{font-size:9px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted)}
+.raffle-dates{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin:26px 0 30px}
+.raffle-dates span{padding:9px 15px;border:1px solid var(--line);border-radius:30px;font-size:12px;color:#d8e3cb}.raffle-dates b{font-weight:600;color:var(--lime)}
+.raffle-hero .button{gap:24px}
+@media(max-width:600px){.raffle-hero{margin-bottom:40px;padding:30px 14px 26px;border-radius:16px}.raffle-prize{letter-spacing:-2px}.raffle-desc{font-size:15px}.raffle-stats{gap:8px}.raffle-stats div{padding:14px 6px}.raffle-stats span{font-size:8px;letter-spacing:.8px}.raffle-countdown{gap:6px}.raffle-countdown div{min-width:60px;padding:10px 4px}.raffle-countdown b{font-size:24px}}
+
+/* Maquinita: los números giran como tragamonedas y se detienen uno por uno. */
+.lucky-results span{width:auto;min-width:52px;padding:0 10px}
+.lucky-results span.rolling{color:#e8c777;border-color:#e8c77766;animation:none;filter:blur(.4px)}
+.lucky-results span.landed{border-color:var(--lime);box-shadow:0 0 22px #c5f85b33;animation:ticket-land .5s cubic-bezier(.2,1.6,.4,1)}
+@keyframes ticket-land{0%{transform:scale(.6) rotate(-8deg)}60%{transform:scale(1.2)}100%{transform:scale(1)}}
+
 /* Modo claro: mismos verdes de la marca sobre fondo claro. */
 body{transition:background-color .35s,color .35s}
 :root[data-theme=light]{--lime:#4a7a06;--ink:#16210f;--muted:#5a6852;--paper:#f5f7ef;--line:#2b45122b;color-scheme:light}
@@ -68,6 +101,12 @@ body{transition:background-color .35s,color .35s}
 :root[data-theme=light] .payment-warning{color:#c41d1d;background:#ff4d4d12;border-color:#c41d1d66}:root[data-theme=light] .payment-warning-inline{color:#c41d1d}
 :root[data-theme=light] .selection-bar{background:#fffffff2;box-shadow:0 20px 50px #2b451226}
 :root[data-theme=light] .menu-overlay{background:#16210f66}
+:root[data-theme=light] .raffle-hero{background:radial-gradient(ellipse at 50% 0,#b7f05a33,transparent 60%),radial-gradient(ellipse at 50% 120%,#e8c77722,transparent 60%),#fff;box-shadow:0 30px 70px #2b451218}
+:root[data-theme=light] .raffle-prize{background-image:linear-gradient(100deg,#2d5a00 0%,#4a7a06 45%,#a77b12 90%)}
+:root[data-theme=light] .raffle-desc,:root[data-theme=light] .raffle-dates span{color:var(--ink)}
+:root[data-theme=light] .raffle-stats div{background:#f7f9f2}:root[data-theme=light] .raffle-stats .gold strong,:root[data-theme=light] .raffle-countdown-label{color:#a77b12}
+:root[data-theme=light] .raffle-progress{background:#2b45121a}:root[data-theme=light] .raffle-countdown div{background:#4a7a060d;border-color:#4a7a0633}
+:root[data-theme=light] .lucky-results span.rolling{color:#a77b12}
 :root[data-theme=light] .site-header nav a:hover{background:#4a7a060f}:root[data-theme=light] .site-header nav a[aria-current]{background:#4a7a0612;border-color:#4a7a0633}
 
 .published-raffles{border-top:1px solid var(--line)}.published-raffle-card{display:grid;grid-template-columns:240px 1fr;gap:28px;padding:28px;border:1px solid #c9ae6938;border-radius:14px;margin-top:24px;background:#15201066}.published-raffle-card:not(:has(img)){grid-template-columns:1fr}.published-raffle-card img{width:100%;height:200px;object-fit:cover;border-radius:10px}.published-raffle-card h3{font-size:28px;overflow-wrap:anywhere}.published-description{white-space:pre-wrap;font-size:14px;line-height:1.8;color:var(--muted);overflow-wrap:anywhere}@media(max-width:600px){.published-raffle-card{grid-template-columns:1fr;padding:20px}}
