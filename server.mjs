@@ -11,8 +11,11 @@ mkdirSync('data',{recursive:true});
 const db=new DatabaseSync('data/peso.db');
 db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS reservations(id TEXT PRIMARY KEY,name TEXT,phone TEXT,numbers TEXT,status TEXT,created INTEGER,expires INTEGER); CREATE TABLE IF NOT EXISTS tickets(number INTEGER PRIMARY KEY,reservation TEXT);`);
 const hasColumn=(table,name)=>db.prepare(`PRAGMA table_info(${table})`).all().some(column=>column.name===name);
-for(const [column,type] of [['email','TEXT'],['raffle','TEXT'],['amount_cents','INTEGER']])if(!hasColumn('reservations',column))db.exec(`ALTER TABLE reservations ADD COLUMN ${column} ${type}`);
+for(const [column,type] of [['email','TEXT'],['raffle','TEXT'],['amount_cents','INTEGER'],['name_key','TEXT']])if(!hasColumn('reservations',column))db.exec(`ALTER TABLE reservations ADD COLUMN ${column} ${type}`);
 const normalizeName=value=>value.normalize('NFKC').trim().replace(/\s+/gu,' ').toLocaleLowerCase('es');
+// Lookups search by name, phone or email, so older rows get their normalized name and all three are indexed.
+for(const row of db.prepare('SELECT id,name FROM reservations WHERE name_key IS NULL AND name IS NOT NULL').all())db.prepare('UPDATE reservations SET name_key=? WHERE id=?').run(normalizeName(row.name),row.id);
+db.exec('CREATE INDEX IF NOT EXISTS reservations_name_key ON reservations(name_key); CREATE INDEX IF NOT EXISTS reservations_phone ON reservations(phone); CREATE INDEX IF NOT EXISTS reservations_email ON reservations(email);');
 const validEmail=value=>typeof value==='string'&&value.length<=254&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 db.exec('CREATE TABLE IF NOT EXISTS limits(key TEXT PRIMARY KEY,count INTEGER,until INTEGER); CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,event TEXT,reservation TEXT,created INTEGER);');
 db.exec("CREATE TABLE IF NOT EXISTS raffles(id TEXT PRIMARY KEY,prize TEXT NOT NULL,description TEXT NOT NULL,price_cents INTEGER NOT NULL CHECK(price_cents>0),ticket_count INTEGER NOT NULL CHECK(ticket_count>0),status TEXT NOT NULL DEFAULT 'draft',photo BLOB,photo_type TEXT,created INTEGER NOT NULL);");
@@ -50,8 +53,8 @@ function notifyApproved(reservationId){
 const waha=!!process.env.WAHA_URL,hook=process.env.N8N_WEBHOOK_URL;if(!waha&&!hook)return;
 const r=db.prepare('SELECT r.id,r.name,r.phone,r.numbers,r.amount_cents,f.prize,f.ticket_count,f.draw_at FROM reservations r LEFT JOIN raffles f ON f.id=r.raffle WHERE r.id=?').get(reservationId);if(!r)return;
 const width=Math.max(3,String((r.ticket_count||1)-1).length),numbers=JSON.parse(r.numbers).map(n=>String(n).padStart(width,'0'));
-const payload={event:'payment_approved',folio:r.id,name:r.name,phone:r.phone,whatsapp:'52'+r.phone,numbers,amount:r.amount_cents?money(r.amount_cents):null,prize:r.prize,draw_at:r.draw_at?new Date(r.draw_at).toLocaleString('es-MX',{timeZone:'America/Mexico_City',dateStyle:'long',timeStyle:'short'}):null,lookup_url:`${origin}/#mis-boletos`};
-if(waha){const text=[`¡Hola, ${r.name}! 🎉 Confirmamos tu pago en Peso Ganador.`,'',payload.prize&&`Rifa: ${payload.prize}`,`Tus boletos: ${numbers.join(', ')}`,payload.amount&&`Total pagado: ${payload.amount} MXN`,`Folio: ${r.id}`,payload.draw_at&&`Sorteo: ${payload.draw_at}`,'',`Revisa que tus boletos ya aparecen como aprobados en ${payload.lookup_url} con tu folio y tu teléfono.`,'','¡Mucha suerte! 🍀'].filter(line=>line!==null&&line!==undefined).join('\n');
+const payload={event:'payment_approved',name:r.name,phone:r.phone,whatsapp:'52'+r.phone,numbers,amount:r.amount_cents?money(r.amount_cents):null,prize:r.prize,draw_at:r.draw_at?new Date(r.draw_at).toLocaleString('es-MX',{timeZone:'America/Mexico_City',dateStyle:'long',timeStyle:'short'}):null,lookup_url:`${origin}/#mis-boletos`};
+if(waha){const text=[`¡Hola, ${r.name}! 🎉 Confirmamos tu pago en Peso Ganador.`,'',payload.prize&&`Rifa: ${payload.prize}`,`Tus boletos: ${numbers.join(', ')}`,payload.amount&&`Total pagado: ${payload.amount} MXN`,payload.draw_at&&`Sorteo: ${payload.draw_at}`,'',`Revisa que tus boletos ya aparecen como aprobados en ${payload.lookup_url} buscando con tu teléfono.`,'','¡Mucha suerte! 🍀'].filter(line=>line!==null&&line!==undefined).join('\n');
 sendWhatsApp(r.phone,text).then(()=>audit('whatsapp_sent',r.id)).catch(error=>{audit('whatsapp_failed',r.id);console.error('whatsapp_failed',error.message);});}
 if(hook){const headers={'Content-Type':'application/json'};if(process.env.N8N_WEBHOOK_SECRET)headers['X-Peso-Secret']=process.env.N8N_WEBHOOK_SECRET;
 fetch(hook,{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(10000)}).then(res=>{if(!res.ok)console.error('n8n_webhook_failed',res.status);}).catch(()=>console.error('n8n_webhook_failed'));}
@@ -134,11 +137,10 @@ const publicPhoto=path.match(/^\/api\/raffles\/([a-f0-9]{24})\/photo$/);
 if(publicPhoto&&['GET','HEAD'].includes(req.method)){const row=db.prepare("SELECT photo,photo_type FROM raffles WHERE id=? AND status IN ('active','closed')").get(publicPhoto[1]);if(!row?.photo)return send(res,404,{error:'Foto no disponible'});res.setHeader('Content-Type',row.photo_type);return res.end(req.method==='HEAD'?undefined:Buffer.from(row.photo));}
 if(path==='/api/payments/submit'&&req.method==='POST'){
 limits(req,'payment_submit',300,10);const b=await body(req,Math.ceil(RECEIPT_MAX/3)*4+4096);
-if(typeof b.folio!=='string'||!/^[a-f0-9]{24}$/i.test(b.folio.trim())||typeof b.phone!=='string'||!/^\d{10}$/.test(b.phone)||typeof b.tracking!=='string'||b.tracking.length>100)return send(res,400,{error:'Revisa folio, teléfono y clave de rastreo.'});
-const row=db.prepare('SELECT id,status,expires FROM reservations WHERE id=? AND phone=?').get(b.folio.trim().toLowerCase(),b.phone);
-if(!row)return send(res,404,{error:'No encontramos una coincidencia con esos datos y folio.'});
-if(row.status==='paid')return send(res,409,{error:'Este apartado ya tiene el pago confirmado.'});
-if(row.status!=='pending'||row.expires<Date.now())return send(res,409,{error:'El apartado ya venció. Si ya pagaste, contáctanos con tu folio y comprobante.'});
+if(typeof b.phone!=='string'||!/^\d{10}$/.test(b.phone)||typeof b.tracking!=='string'||b.tracking.length>100)return send(res,400,{error:'Revisa tu teléfono y la clave de rastreo.'});
+// Each phone has at most one pending reservation per raffle, so the phone identifies what is being paid.
+const row=db.prepare("SELECT id FROM reservations WHERE phone=? AND status='pending' AND expires>=? ORDER BY created DESC LIMIT 1").get(b.phone,Date.now());
+if(!row){const paid=db.prepare("SELECT 1 FROM reservations WHERE phone=? AND status='paid' LIMIT 1").get(b.phone);return send(res,paid?409:404,{error:paid?'Los boletos de este teléfono ya tienen el pago confirmado. Revísalos en «Mis boletos».':'No encontramos boletos pendientes de pago con ese teléfono. Si tu apartado venció y ya pagaste, contáctanos con tu comprobante.'});}
 const tracking=b.tracking.replace(/\s/g,'').toUpperCase();if(!/^[A-Z0-9]{6,64}$/.test(tracking))return send(res,400,{error:'La clave de rastreo o referencia debe tener de 6 a 64 letras o números.'});
 if(!b.receipt)return send(res,400,{error:'Adjunta tu comprobante en JPG, PNG o PDF.'});
 const receipt=receiptFile(b.receipt),id=randomBytes(12).toString('hex'),now=Date.now();
@@ -146,8 +148,8 @@ db.exec('BEGIN IMMEDIATE');
 try{db.prepare('INSERT INTO payment_submissions(id,reservation,tracking,receipt,receipt_type,created) VALUES(?,?,?,?,?,?)').run(id,row.id,tracking,receipt.bytes,receipt.type,now);
 // Keep the tickets held while the receipt waits for review.
 db.prepare('UPDATE reservations SET expires=MAX(expires,?) WHERE id=?').run(now+REVIEW_HOLD,row.id);db.exec('COMMIT');}
-catch(error){db.exec('ROLLBACK');if(String(error.code).includes('CONSTRAINT')||String(error.message).includes('UNIQUE'))return send(res,409,{error:'No se pudo registrar: ya hay un comprobante en revisión para este folio o la referencia ya fue utilizada.'});throw error;}
-return send(res,201,{id,status:'pending',message:'¡Comprobante recibido! Tus boletos quedan apartados mientras revisamos tu pago. Consulta el estado con tu folio.'});
+catch(error){db.exec('ROLLBACK');if(String(error.code).includes('CONSTRAINT')||String(error.message).includes('UNIQUE'))return send(res,409,{error:'No se pudo registrar: ya hay un comprobante en revisión para este teléfono o la referencia ya fue utilizada.'});throw error;}
+return send(res,201,{id,status:'pending',message:'¡Comprobante recibido! Tus boletos quedan apartados mientras revisamos tu pago. Consulta el estado en «Mis boletos» con tu teléfono.'});
 }
 if(path==='/api/tickets/random'&&req.method==='POST'){
 limits(req,'random_tickets',1200,60);const b=await body(req);
@@ -162,12 +164,14 @@ return send(res,200,{numbers:available.slice(0,b.quantity),quantity:b.quantity})
 if(path==='/api/tickets/lookup'&&req.method==='POST'){
 limits(req,'ticket_lookup',600,20);
 const b=await body(req);
-if(!['name','phone','email'].includes(b.method)||typeof b.value!=='string'||!b.value.trim()||b.value.length>254||typeof b.folio!=='string'||!/^[a-f0-9]{24}$/i.test(b.folio.trim()))return send(res,400,{error:'Selecciona un dato de registro e introduce tu folio de 24 caracteres.'});
-const row=db.prepare('SELECT r.id,r.name,r.phone,r.email,r.numbers,r.status,r.created,r.expires,r.amount_cents,f.prize,f.ticket_count,f.draw_at FROM reservations r LEFT JOIN raffles f ON f.id=r.raffle WHERE r.id=?').get(b.folio.trim().toLowerCase());
-const matches=row&&(b.method==='name'?normalizeName(row.name)===normalizeName(b.value):b.method==='phone'?row.phone===b.value.trim():row.email&&row.email===b.value.trim().toLowerCase());
-if(!matches)return send(res,404,{error:'No encontramos una coincidencia con esos datos y folio. Revisa ambos e intenta de nuevo.'});
-const payment=db.prepare('SELECT status,reason FROM payment_submissions WHERE reservation=? ORDER BY created DESC,id DESC LIMIT 1').get(row.id);
-return send(res,200,{folio:row.id,numbers:JSON.parse(row.numbers),status:row.status,created:row.created,expires:row.expires,amount_cents:row.amount_cents,prize:row.prize,ticket_count:row.ticket_count,draw_at:row.draw_at,payment:payment||null});
+if(!['name','phone','email'].includes(b.method)||typeof b.value!=='string'||!b.value.trim()||b.value.length>254)return send(res,400,{error:'Elige cómo buscar y escribe tu nombre, teléfono o correo.'});
+const value=b.method==='name'?normalizeName(b.value):b.value.trim().toLowerCase();
+if(b.method==='phone'&&!/^\d{10}$/.test(value))return send(res,400,{error:'Escribe tu teléfono de 10 dígitos.'});
+// Results only carry ticket numbers and statuses, never names, phones or emails.
+const rows=db.prepare(`SELECT r.id,r.numbers,r.status,r.created,r.expires,r.amount_cents,f.prize,f.ticket_count,f.draw_at FROM reservations r LEFT JOIN raffles f ON f.id=r.raffle WHERE r.${{name:'name_key',phone:'phone',email:'email'}[b.method]}=? ORDER BY r.created DESC LIMIT 20`).all(value);
+if(!rows.length)return send(res,404,{error:'No encontramos boletos con ese dato. Revisa que esté escrito igual que cuando apartaste.'});
+const lastPayment=db.prepare('SELECT status,reason FROM payment_submissions WHERE reservation=? ORDER BY created DESC,id DESC LIMIT 1');
+return send(res,200,{results:rows.map(row=>({numbers:JSON.parse(row.numbers),status:row.status,created:row.created,expires:row.expires,amount_cents:row.amount_cents,prize:row.prize,ticket_count:row.ticket_count,draw_at:row.draw_at,payment:lastPayment.get(row.id)||null}))});
 }
 if(path==='/api/reservations'&&req.method==='POST'){
 limits(req,'reservations',600,20);
@@ -176,12 +180,18 @@ const raffle=activeRaffle();if(!salesOpen(raffle))return send(res,409,{error:clo
 if(typeof b.name!=='string'||b.name.trim().length<3||b.name.length>100||typeof b.phone!=='string'||!/^\d{10}$/.test(b.phone)||!nums.length||nums.length>MAX_PER_PHONE||nums.some(n=>!Number.isInteger(n)||n<0||n>=raffle.ticket_count))return send(res,400,{error:`Revisa nombre, teléfono y boletos (máximo ${MAX_PER_PHONE}).`});
 const email=b.email==null||b.email===''?null:typeof b.email==='string'?b.email.trim().toLowerCase():b.email;
 if(email!==null&&!validEmail(email))return send(res,400,{error:'Revisa el correo electrónico.'});
-const id=randomBytes(12).toString('hex'),now=Date.now(),expires=now+holdMs(),amount=nums.length*raffle.price_cents;db.exec('BEGIN IMMEDIATE');
+const now=Date.now();let current,numbers,amount,expires;db.exec('BEGIN IMMEDIATE');
 try{
-const active=db.prepare("SELECT numbers FROM reservations WHERE phone=? AND raffle=? AND status='pending'").all(b.phone,raffle.id).reduce((sum,row)=>sum+JSON.parse(row.numbers).length,0);
-if(active+nums.length>MAX_PER_PHONE){db.exec('ROLLBACK');return send(res,429,{error:'Este teléfono ya tiene el máximo de boletos pendientes de pago.'});}
-db.prepare('INSERT INTO reservations(id,name,phone,numbers,status,created,expires,email,raffle,amount_cents) VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,b.name.trim(),b.phone,JSON.stringify(nums),'pending',now,expires,email,raffle.id,amount);for(const n of nums)db.prepare('INSERT INTO raffle_tickets VALUES(?,?,?)').run(raffle.id,n,id);db.exec('COMMIT');}catch{db.exec('ROLLBACK');return send(res,409,{error:'Algún boleto acaba de ser apartado. Actualiza tu selección.'});}
-return send(res,201,{id,amount_cents:amount,expires,message:'¡Boletos apartados! Realiza tu pago antes de que venza el apartado y envía tu comprobante con este folio.'});
+// New tickets join the phone's pending reservation, so each phone pays a single total per raffle.
+current=db.prepare("SELECT id,numbers,expires FROM reservations WHERE phone=? AND raffle=? AND status='pending' ORDER BY created DESC LIMIT 1").get(b.phone,raffle.id);
+if(current&&db.prepare("SELECT 1 FROM payment_submissions WHERE reservation=? AND status='pending'").get(current.id)){db.exec('ROLLBACK');return send(res,409,{error:'Tienes un comprobante en revisión. Espera la confirmación de tu pago para apartar más boletos.'});}
+const previous=current?JSON.parse(current.numbers):[];
+if(previous.length+nums.length>MAX_PER_PHONE){db.exec('ROLLBACK');return send(res,429,{error:`Este teléfono ya tiene ${previous.length} boletos pendientes de pago; el máximo es ${MAX_PER_PHONE}. Paga tu apartado para poder apartar más.`});}
+numbers=[...previous,...nums];amount=numbers.length*raffle.price_cents;expires=Math.max(current?.expires||0,now+holdMs());const id=current?.id||randomBytes(12).toString('hex');
+if(current)db.prepare('UPDATE reservations SET numbers=?,amount_cents=?,expires=?,email=COALESCE(email,?) WHERE id=?').run(JSON.stringify(numbers),amount,expires,email,id);
+else db.prepare('INSERT INTO reservations(id,name,phone,numbers,status,created,expires,email,raffle,amount_cents,name_key) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(id,b.name.trim(),b.phone,JSON.stringify(numbers),'pending',now,expires,email,raffle.id,amount,normalizeName(b.name));
+for(const n of nums)db.prepare('INSERT INTO raffle_tickets VALUES(?,?,?)').run(raffle.id,n,id);db.exec('COMMIT');}catch{db.exec('ROLLBACK');return send(res,409,{error:'Algún boleto acaba de ser apartado. Actualiza tu selección.'});}
+return send(res,201,{numbers,added:nums.length,amount_cents:amount,expires,message:numbers.length>nums.length?'¡Agregamos los boletos a tu apartado! Paga el nuevo total antes de que venza y envía tu comprobante con tu teléfono.':'¡Boletos apartados! Realiza tu pago antes de que venza el apartado y envía tu comprobante con tu teléfono.'});
 }
 if(path==='/api/login'&&req.method==='POST'){
 if(!credentials.exists())return send(res,503,{error:'Administrador pendiente de configurar en el servidor.'});

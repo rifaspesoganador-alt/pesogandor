@@ -12,7 +12,7 @@ Configure `ADMIN_PASSWORD` antes del primer arranque para crear el acceso admini
 
 ## Flujo del participante
 
-Elige hasta 10 boletos (o usa la maquinita de la suerte), registra nombre, teléfono y correo opcional y recibe un folio con el total a pagar. Paga a la cuenta publicada y envía el comprobante (JPG, PNG o PDF, máximo 5 MB) con su folio, teléfono y clave de rastreo o referencia. Mientras el comprobante está en revisión, los boletos quedan apartados 48 horas. En «Mis boletos» consulta el estado con su folio y teléfono, correo o nombre.
+Elige hasta 10 boletos (o usa la maquinita de la suerte), registra nombre, teléfono y correo opcional y ve el total a pagar. No hay folios: el teléfono identifica el apartado. Si vuelve a apartar con el mismo teléfono, los boletos se suman a su apartado pendiente (máximo 10 pendientes); mientras tenga un comprobante en revisión no puede apartar más. Paga a la cuenta publicada y envía el comprobante (JPG, PNG o PDF, máximo 5 MB) con su teléfono y clave de rastreo o referencia. Mientras el comprobante está en revisión, los boletos quedan apartados 48 horas. En «Mis boletos» busca por nombre, teléfono o correo y ve todos sus apartados (números, estado y total, sin datos personales).
 
 ## Validación de pagos
 
@@ -20,7 +20,7 @@ En **Pagos por revisar** aparece cada comprobante con el monto esperado. Confirm
 
 ## WhatsApp con WAHA
 
-Al aprobar un pago, la página manda un WhatsApp al participante con sus boletos, el total, el folio, la fecha del sorteo y el enlace a «Mis boletos». Usa WAHA (WhatsApp HTTP API). En el `.env` del servidor configure:
+Al aprobar un pago, la página manda un WhatsApp al participante con sus boletos, el total, la fecha del sorteo y el enlace a «Mis boletos». Usa WAHA (WhatsApp HTTP API). En el `.env` del servidor configure:
 
 - `WAHA_URL`: dirección de WAHA, por ejemplo `https://waha.midominio.com` (o `http://waha:3000` si está en la misma red de Docker).
 - `WAHA_API_KEY`: la clave de API de WAHA (`WHATSAPP_API_KEY` en WAHA), si la tiene activada.
@@ -30,7 +30,7 @@ Antes de enviar, la página pregunta a WAHA el chat correcto del número (en Mé
 
 ## Aviso opcional a n8n
 
-Si además configura `N8N_WEBHOOK_URL`, al aprobar un pago el servidor envía un POST JSON a `N8N_WEBHOOK_URL` con `event` (`payment_approved`), `folio`, `name`, `phone`, `whatsapp` (52 + 10 dígitos), `numbers`, `amount`, `prize`, `draw_at` y `lookup_url`. Si existe `N8N_WEBHOOK_SECRET`, se envía en el encabezado `X-Peso-Secret` para que n8n rechace llamadas ajenas. Si n8n falla, el pago queda aprobado de todos modos y el error aparece en `docker compose logs web`. Configure ambas variables en el `.env` del servidor.
+Si además configura `N8N_WEBHOOK_URL`, al aprobar un pago el servidor envía un POST JSON a `N8N_WEBHOOK_URL` con `event` (`payment_approved`), `name`, `phone`, `whatsapp` (52 + 10 dígitos), `numbers`, `amount`, `prize`, `draw_at` y `lookup_url`. Si existe `N8N_WEBHOOK_SECRET`, se envía en el encabezado `X-Peso-Secret` para que n8n rechace llamadas ajenas. Si n8n falla, el pago queda aprobado de todos modos y el error aparece en `docker compose logs web`. Configure ambas variables en el `.env` del servidor.
 
 ## Límites anti-abuso
 
