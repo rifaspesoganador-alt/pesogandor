@@ -15,6 +15,7 @@ assert.equal((await post('/api/admin/payment-settings',bank)).status,200);
 const now=Date.now();const created=await post('/api/admin/raffles',{prize:'Premio',description:'Descripción',price,ticketCount,startsAt:mx(now-3600000),endsAt:mx(now+86400000),drawAt:mx(now+172800000),photo:null});assert.equal(created.status,201);const {id}=await created.json();
 assert.equal((await post('/api/admin/raffles/status',{id,status:'active'})).status,200);return id;
 }
+const isTaken=(raffle,n)=>(Buffer.from(raffle.taken,'base64')[n>>3]>>(n&7))&1;
 async function adminCookie(base,password){const r=await fetch(base+'/api/login',{method:'POST',headers:{Origin:base,'Content-Type':'application/json'},body:JSON.stringify({password})});assert.equal(r.status,200);return r.headers.get('set-cookie').split(';')[0];}
 test('reservations are exclusive and admin access is protected',async()=>{
 const dir=mkdtempSync(join(tmpdir(),'peso-test-'));const proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env:{...process.env,PORT:'3097',ADMIN_PASSWORD:'test-only-strong-secret'}});
@@ -114,7 +115,7 @@ await openSale(base,await adminCookie(base,'lucky-test-password'));
 for(const quantity of [0,11,-1,1.5,'3',null])assert.equal((await draw(quantity)).status,400);
 assert.equal((await post('/api/tickets/random',{quantity:3},'https://evil.example')).status,403);
 for(let i=0;i<5;i++){const r=await draw(10);assert.equal(r.status,200);const data=await r.json();assert.equal(data.numbers.length,10);assert.equal(new Set(data.numbers).size,10);assert.ok(data.numbers.every(n=>Number.isInteger(n)&&n>=0&&n<100));}
-assert.deepEqual((await (await fetch(base+'/api/raffle')).json()).taken,[]);
+assert.ok(Buffer.from((await (await fetch(base+'/api/raffle')).json()).taken,'base64').every(byte=>byte===0));
 for(let batch=0;batch<10;batch++){
 const numbers=Array.from({length:10},(_,i)=>batch*10+i);
 const reserved=await post('/api/reservations',{name:'Lucky Test',phone:'55'+String(batch).padStart(8,'0'),numbers});assert.equal(reserved.status,201);
@@ -137,7 +138,7 @@ assert.equal((await post('/api/admin/raffles',input,{Origin:'https://evil.exampl
 const good=await post('/api/admin/raffles',input);assert.equal(good.status,201);const saved=await good.json();assert.equal(saved.status,'draft');
 const photoPath=`/api/admin/raffles/${saved.id}/photo`;assert.equal((await fetch(base+photoPath)).status,401);
 const photo=await fetch(base+photoPath,{headers:{Cookie:cookie}});assert.equal(photo.status,200);assert.equal(photo.headers.get('content-type'),'image/png');assert.deepEqual(Buffer.from(await photo.arrayBuffer()),Buffer.from(png,'base64'));
-for(const change of [{price:'0'},{price:'1.001'},{ticketCount:0},{ticketCount:1.5},{ticketCount:10001},{prize:'x'},{description:''},{startsAt:undefined},{photo:{type:'image/svg+xml',base64:Buffer.from('<svg/>').toString('base64')}},{photo:{type:'image/jpeg',base64:png}}])assert.equal((await post('/api/admin/raffles',{...input,...change})).status,400);
+for(const change of [{price:'0'},{price:'1.001'},{ticketCount:0},{ticketCount:1.5},{ticketCount:100001},{prize:'x'},{description:''},{startsAt:undefined},{photo:{type:'image/svg+xml',base64:Buffer.from('<svg/>').toString('base64')}},{photo:{type:'image/jpeg',base64:png}}])assert.equal((await post('/api/admin/raffles',{...input,...change})).status,400);
 const publicPhotoPath=`/api/raffles/${saved.id}/photo`;assert.equal((await fetch(base+publicPhotoPath)).status,404);assert.equal((await (await fetch(base+'/api/raffle')).json()).raffle,null);
 assert.equal((await post('/api/admin/raffles/status',{id:saved.id,status:'active'},{Cookie:''})).status,401);
 assert.equal((await post('/api/admin/raffles/status',{id:saved.id,status:'published_demo'})).status,400);
@@ -178,7 +179,7 @@ const receiptResponse=await fetch(base+`/api/admin/payments/${payment.id}/receip
 const listed=await (await fetch(base+'/api/admin/payments',{headers:{Cookie:cookie}})).json();assert.equal(listed[0].amount_cents,5000);assert.equal(Object.hasOwn(listed[0],'receipt'),false);
 db=new DatabaseSync(join(dir,'data/peso.db'));db.prepare('UPDATE reservations SET expires=1 WHERE id=?').run(reserved.id);db.close();
 assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'approved',reason:'Test reason'},cookie)).status,409);
-const raffle=await (await fetch(base+'/api/raffle')).json();assert.ok(!raffle.taken.includes(2));
+const raffle=await (await fetch(base+'/api/raffle')).json();assert.equal(isTaken(raffle,2),0);
 assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'rejected',reason:'Apartado vencido, aclarar pago'},cookie)).status,200);
 const lookup=await (await post('/api/tickets/lookup',{folio:reserved.id,method:'phone',value:'5512345678'})).json();assert.equal(lookup.payment.status,'rejected');assert.equal(lookup.status,'expired');assert.equal(Object.hasOwn(lookup.payment,'receipt'),false);
 const other=await (await post('/api/reservations',{name:'Pdf Test',phone:'5512345670',numbers:[3]})).json();
@@ -186,6 +187,24 @@ const pdf=await post('/api/payments/submit',{folio:other.id,phone:'5512345670',t
 assert.equal((await post('/api/admin/payments/review',{id:pdfPayment.id,decision:'rejected',reason:'Monto incompleto'},cookie)).status,200);
 db=new DatabaseSync(join(dir,'data/peso.db'));const back=db.prepare('SELECT status,expires FROM reservations WHERE id=?').get(other.id);db.close();assert.equal(back.status,'pending');assert.ok(back.expires<=Date.now()+3600000);
 }finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;rmSync(dir,{recursive:true,force:true});}
+});
+
+test('approved payments send WhatsApp through WAHA and notify n8n; large raffles report availability as a bitmap',async()=>{
+// One fake server plays both WAHA (/api/...) and the n8n webhook (/hook).
+const {createServer}=await import('node:http');const calls=[],waha=[];const hook=createServer((req,res)=>{let text='';req.on('data',chunk=>text+=chunk);req.on('end',()=>{const url=new URL(req.url,'http://x');if(url.pathname==='/api/contacts/check-exists'){waha.push({path:url.pathname,phone:url.searchParams.get('phone'),session:url.searchParams.get('session'),key:req.headers['x-api-key']});res.setHeader('Content-Type','application/json');return res.end(JSON.stringify({numberExists:true,chatId:'5215512345678@c.us'}));}if(url.pathname==='/api/sendText'){waha.push({path:url.pathname,key:req.headers['x-api-key'],body:JSON.parse(text)});res.setHeader('Content-Type','application/json');return res.end('{}');}calls.push({secret:req.headers['x-peso-secret'],body:JSON.parse(text)});res.end('ok');});});await new Promise(r=>hook.listen(3110,'127.0.0.1',r));
+const dir=mkdtempSync(join(tmpdir(),'peso-n8n-'));const base='http://localhost:3104';const proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env:{...process.env,PORT:'3104',NODE_ENV:'test',PUBLIC_ORIGIN:base,ADMIN_PASSWORD:'n8n-test-password',N8N_WEBHOOK_URL:'http://127.0.0.1:3110/hook',N8N_WEBHOOK_SECRET:'hook-secret',WAHA_URL:'http://127.0.0.1:3110/',WAHA_API_KEY:'waha-key',WAHA_SESSION:'peso'}});
+const post=(path,data,cookie='')=>fetch(base+path,{method:'POST',headers:{Origin:base,'Content-Type':'application/json',Cookie:cookie},body:JSON.stringify(data)});
+try{await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});
+const cookie=await adminCookie(base,'n8n-test-password');await openSale(base,cookie,{ticketCount:100000});
+const reserved=await (await post('/api/reservations',{name:'Ana Pérez',phone:'5512345678',numbers:[7,99999]})).json();
+const raffle=await (await fetch(base+'/api/raffle')).json();assert.equal(Buffer.from(raffle.taken,'base64').length,12500);assert.equal(isTaken(raffle,7),1);assert.equal(isTaken(raffle,99999),1);assert.equal(isTaken(raffle,8),0);assert.equal(raffle.holdHours,1);
+const payment=await (await post('/api/payments/submit',{folio:reserved.id,phone:'5512345678',tracking:'HOOK123456',receipt:{type:'image/png',base64:png}})).json();
+assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'approved',reason:'Depósito verificado'},cookie)).status,200);
+for(let i=0;i<50&&(!calls.length||waha.length<2);i++)await new Promise(r=>setTimeout(r,100));
+assert.deepEqual(waha.map(x=>x.path),['/api/contacts/check-exists','/api/sendText']);assert.equal(waha[0].phone,'525512345678');assert.equal(waha[0].session,'peso');assert.ok(waha.every(x=>x.key==='waha-key'));
+const message=waha[1].body;assert.equal(message.session,'peso');assert.equal(message.chatId,'5215512345678@c.us');assert.match(message.text,/Ana Pérez/);assert.match(message.text,/00007, 99999/);assert.match(message.text,/#mis-boletos/);
+assert.equal(calls.length,1);assert.equal(calls[0].secret,'hook-secret');const sent=calls[0].body;assert.equal(sent.event,'payment_approved');assert.equal(sent.folio,reserved.id);assert.equal(sent.whatsapp,'525512345678');assert.deepEqual(sent.numbers,['00007','99999']);assert.equal(sent.name,'Ana Pérez');assert.match(sent.lookup_url,/#mis-boletos$/);
+}finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;hook.close();rmSync(dir,{recursive:true,force:true});}
 });
 
 test('admin password changes survive restart and ignore old bootstrap environment',async()=>{
