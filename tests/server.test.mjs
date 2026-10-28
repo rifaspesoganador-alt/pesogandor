@@ -214,6 +214,33 @@ assert.equal(calls.length,1);assert.equal(calls[0].secret,'hook-secret');const s
 }finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;hook.close();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('admin edits, deletes and reschedules raffles against the sales goal',async()=>{
+const dir=mkdtempSync(join(tmpdir(),'peso-edit-'));const base='http://localhost:3105';const proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env:{...process.env,PORT:'3105',NODE_ENV:'test',PUBLIC_ORIGIN:base,ADMIN_PASSWORD:'edit-test-password'}});
+let cookie='';const post=(path,data)=>fetch(base+path,{method:'POST',headers:{Origin:base,'Content-Type':'application/json',Cookie:cookie},body:JSON.stringify(data)});
+const list=async()=>await (await fetch(base+'/api/admin/raffles',{headers:{Cookie:cookie}})).json();
+try{await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});
+cookie=await adminCookie(base,'edit-test-password');const now=Date.now();
+const dates={startsAt:mx(now+86400000),endsAt:mx(now+2*86400000),drawAt:mx(now+3*86400000)};
+const draft=await (await post('/api/admin/raffles',{prize:'Borrador',description:'D',price:'10',ticketCount:50,...dates,photo:null})).json();assert.equal((await list())[0].goal_percent,80);
+assert.equal((await post('/api/admin/raffles/update',{id:draft.id,prize:'Premio corregido',description:'Nueva',price:'12.50',ticketCount:60,goalPercent:0,...dates})).status,400);
+assert.equal((await post('/api/admin/raffles/update',{id:draft.id,prize:'Premio corregido',description:'Nueva',price:'12.50',ticketCount:60,goalPercent:50,...dates,photo:{type:'image/png',base64:png}})).status,200);
+let row=(await list()).find(x=>x.id===draft.id);assert.equal(row.prize,'Premio corregido');assert.equal(row.price_cents,1250);assert.equal(row.ticket_count,60);assert.equal(row.goal_percent,50);assert.equal(row.has_photo,1);
+assert.equal((await post('/api/admin/raffles/update',{id:draft.id,prize:'Premio corregido',description:'Nueva',price:'12.50',ticketCount:60,goalPercent:50,...dates,photo:null})).status,200);assert.equal((await list()).find(x=>x.id===draft.id).has_photo,0);
+assert.equal((await post('/api/admin/raffles/delete',{id:draft.id})).status,200);assert.equal((await list()).some(x=>x.id===draft.id),false);
+const live=await openSale(base,cookie,{ticketCount:10});row=(await list()).find(x=>x.id===live);const liveDates={startsAt:mx(row.starts_at),endsAt:mx(row.ends_at),drawAt:mx(row.draw_at)};
+assert.equal((await post('/api/reservations',{name:'Goal Test',phone:'5512345678',numbers:[8]})).status,201);
+const edit=changes=>post('/api/admin/raffles/update',{id:live,prize:'Premio',description:'Descripción',price:'50',ticketCount:20,goalPercent:80,...liveDates,...changes});
+assert.equal((await edit({price:'99'})).status,409);assert.equal((await edit({ticketCount:8})).status,409);assert.equal((await edit({})).status,200);
+assert.equal((await post('/api/admin/raffles/delete',{id:live})).status,409);
+assert.equal((await post('/api/admin/raffles/reschedule',{id:live,endsAt:mx(now-60000),drawAt:mx(now+86400000)})).status,400);
+const moved=await post('/api/admin/raffles/reschedule',{id:live,endsAt:mx(now+5*86400000),drawAt:mx(now+6*86400000)});assert.equal(moved.status,200);assert.equal((await moved.json()).status,'active');
+const shown=(await (await fetch(base+'/api/raffle')).json()).raffle;assert.equal(shown.rescheduled,1);assert.equal(shown.ends_at,Date.parse(mx(now+5*86400000)));
+assert.equal((await edit({goalPercent:5,...{endsAt:mx(now+5*86400000),drawAt:mx(now+6*86400000)}})).status,200);
+const payment=await (await post('/api/payments/submit',{phone:'5512345678',tracking:'GOAL123456',receipt:{type:'image/png',base64:png}})).json();assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'approved',reason:'Depósito verificado'})).status,200);
+assert.equal((await post('/api/admin/raffles/reschedule',{id:live,endsAt:mx(now+7*86400000),drawAt:mx(now+8*86400000)})).status,409);
+}finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;rmSync(dir,{recursive:true,force:true});}
+});
+
 test('admin password changes survive restart and ignore old bootstrap environment',async()=>{
 const dir=mkdtempSync(join(tmpdir(),'peso-password-'));const base='http://localhost:3103';let proc,cookie='';const env={...process.env,PORT:'3103',NODE_ENV:'production',PUBLIC_ORIGIN:'https://pesoganador.com',ADMIN_PASSWORD:'initial-test-password'};
 async function start(){proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env});await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});}
