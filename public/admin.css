@@ -21,4 +21,29 @@
 .admin-site .button.danger{background:transparent;color:#ff9c9c;border-color:#ff6b6b66}.admin-site .button.danger:hover{background:#ff6b6b14;box-shadow:none}
 .admin-site .raffle-inline-form{margin:18px 0 0;padding:20px;border:1px solid #c4875938;border-radius:12px;background:#130f0c}
 .admin-site input[type=datetime-local]{color-scheme:dark}
+
+/* Modo claro del panel: fondos claros con los acentos naranja de siempre. */
+:root[data-theme=light] .admin-site{--lime:#d0590f;--paper:#faf6f1;--ink:#2a1a10;--muted:#7a6656;--line:#5a3a2024;background:radial-gradient(ellipse at 5% 28%,#ff9a5a26,transparent 35%),radial-gradient(ellipse at 95% 12%,#ffb26f1f,transparent 35%),var(--paper);color:var(--ink)}
+:root[data-theme=light] .admin-grid{background-image:linear-gradient(#c0703a12 1px,transparent 1px),linear-gradient(90deg,#c0703a12 1px,transparent 1px)}
+:root[data-theme=light] .admin-site .button{background:#d0590f;color:#fff;border-color:#d0590f}:root[data-theme=light] .admin-site .button:hover{background:#b44a08;box-shadow:0 10px 26px #d0590f33}
+:root[data-theme=light] .admin-site .button.outline{background:transparent;color:var(--ink);border-color:#b06a3a66}:root[data-theme=light] .admin-site .button.outline:hover{background:#d0590f10}
+:root[data-theme=light] .admin-site .button.danger{background:transparent;color:#c0392b;border-color:#c0392b66}
+:root[data-theme=light] .admin-site input,:root[data-theme=light] .admin-site select,:root[data-theme=light] .admin-site textarea{background:#fff;color:var(--ink);border-color:#b06a3a44}
+:root[data-theme=light] .admin-site input::placeholder{color:#a08f82}:root[data-theme=light] .admin-site input[type=datetime-local]{color-scheme:light}
+:root[data-theme=light] .admin-site label{color:var(--ink)}
+:root[data-theme=light] .admin-site header.site-header{background:#fffaf5}
+:root[data-theme=light] .records-panel,:root[data-theme=light] .raffle-management,:root[data-theme=light] .access-panel{background:#fff;border-color:#b06a3a33;box-shadow:0 14px 40px #5a3a2012}
+:root[data-theme=light] .metric{background:linear-gradient(140deg,#ffe3cf66,#fff);border-color:#b06a3a33}
+:root[data-theme=light] .metric strong{color:var(--ink)}:root[data-theme=light] .metric:nth-child(2) strong{color:#d0590f}
+:root[data-theme=light] .metric>span,:root[data-theme=light] .metric small,:root[data-theme=light] .records-note,:root[data-theme=light] .record-date,:root[data-theme=light] .record-state-note,:root[data-theme=light] .access-note,:root[data-theme=light] .access-footnote,:root[data-theme=light] .dashboard-bottom{color:var(--muted)}
+:root[data-theme=light] .admin-site h1 em,:root[data-theme=light] .admin-site h2 em{color:#d0590f}
+:root[data-theme=light] .record-top h3,:root[data-theme=light] .raffle-goal p,:root[data-theme=light] .admin-message,:root[data-theme=light] .admin-site dialog>p:not(.eyebrow){color:var(--ink)}
+:root[data-theme=light] .record-contact{color:#6b4a35}:root[data-theme=light] .record-tickets>span{color:#b44a08;background:#ff873d14}:root[data-theme=light] .raffle-card-details{color:#b44a08}
+:root[data-theme=light] .admin-site #raffle-form,:root[data-theme=light] .admin-site .raffle-inline-form,:root[data-theme=light] .raffle-goal,:root[data-theme=light] .payment-review-form{background:#fdf7f1;border-color:#b06a3a33}
+:root[data-theme=light] .raffle-goal-bar{background:#5a3a201a}:root[data-theme=light] .raffle-goal-bar b{background:var(--ink)}
+:root[data-theme=light] .raffle-goal small,:root[data-theme=light] .admin-site #raffle-message,:root[data-theme=light] #password-message,:root[data-theme=light] .raffle-fields input::file-selector-button{color:#b44a08}:root[data-theme=light] .raffle-goal.reached small{color:#2f7a3a}
+:root[data-theme=light] .status-badge{color:var(--ink);border-color:#5a3a2033;background:#5a3a2008}:root[data-theme=light] .status-pending{color:#b44a08;border-color:#d0590f55;background:#ff873d14}:root[data-theme=light] .status-paid{color:#2f7a3a;border-color:#2f7a3a44;background:#2f7a3a0d}
+:root[data-theme=light] .admin-site dialog{background:#fff;color:var(--ink)}
+:root[data-theme=light] .admin-site .site-header nav a:hover{background:#d0590f12}:root[data-theme=light] .admin-site .site-header nav a[aria-current]{background:#d0590f14;border-color:#d0590f44}
+:root[data-theme=light] .admin-site .theme-toggle:hover{border-color:#d0590f;background:#d0590f10}
 .raffle-date-editor{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px;padding:18px;margin-top:22px;background:#130f0c}.raffle-date-editor>.records-note{grid-column:1/-1;margin:0}.raffle-date-editor input{font-size:12px;color-scheme:dark}#password-form .button{margin-top:20px}#password-message{font-size:12px;line-height:1.8;color:#ffd2b2}@media(max-width:850px){.raffle-date-editor{grid-template-columns:1fr}}

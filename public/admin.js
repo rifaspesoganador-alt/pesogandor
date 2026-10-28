@@ -11,6 +11,10 @@ function setMenu(open){document.body.classList.toggle('menu-open',open);menuTogg
 menuToggle.onclick=()=>setMenu(!document.body.classList.contains('menu-open'));menuOverlay.onclick=()=>setMenu(false);
 document.addEventListener('keydown',event=>{if(event.key==='Escape')setMenu(false);});
 for(const control of document.querySelectorAll('#site-menu a,#site-menu button'))control.addEventListener('click',()=>setMenu(false));
+// Light/dark switch shared with the public site; theme.js already applied the saved choice before paint.
+const themeToggle=document.querySelector('#theme-toggle');
+function paintTheme(){const light=document.documentElement.dataset.theme==='light';themeToggle.setAttribute('aria-pressed',String(light));themeToggle.querySelector('.theme-icon').textContent=light?'☾':'☀';themeToggle.querySelector('.theme-label').textContent=light?'Modo oscuro':'Modo claro';document.querySelector('meta[name=theme-color]').content=light?'#faf6f1':'#100e0c';}
+themeToggle.onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('pg-theme',next);}catch{ /* Storage blocked: the choice lasts for this visit only. */ }paintTheme();};paintTheme();
 const navLinks=[...document.querySelectorAll('.site-header nav a')];
 const sectionObserver=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting)for(const link of navLinks){if(link.hash==='#'+entry.target.id)link.setAttribute('aria-current','location');else link.removeAttribute('aria-current');}},{rootMargin:'-40% 0px -55% 0px'});
 for(const link of navLinks){const section=document.querySelector(link.hash);if(section)sectionObserver.observe(section);}
