@@ -190,3 +190,4 @@ h2 em,.raffle-prize em,.lucky-copy h3 em,.payment-details h3 em{color:var(--lime
 .lucky-results span.more,.checkout-tickets span.more{font:600 13px Poppins,Arial,sans-serif}
 .number-ribbon{font-style:normal;letter-spacing:2px}
 @media(max-width:700px){.raffle-countdown b{font-size:28px}.tickets button{font-size:15px}}
+.price>span,.price small,.raffle-stats strong small{font-family:Poppins,Arial,sans-serif;font-weight:600;letter-spacing:.5px}
