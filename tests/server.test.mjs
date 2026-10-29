@@ -160,7 +160,8 @@ assert.equal((await post('/api/admin/payment-settings',{...bank,clabe:'012 345 6
 assert.equal((await (await fetch(base+'/api/payment-info')).json()).clabe,'012345678901234567');
 current=await (await fetch(base+'/api/raffle')).json();assert.equal(current.open,false);assert.match(current.message,/aún no comienza/);
 assert.equal((await post('/api/reservations',{name:'Early User',phone:'5512345678',numbers:[1]})).status,409);
-const second=await (await post('/api/admin/raffles',{...input,photo:null})).json();assert.equal((await post('/api/admin/raffles/status',{id:second.id,status:'active'})).status,409);
+const second=await (await post('/api/admin/raffles',{...input,photo:null})).json();assert.equal((await post('/api/admin/raffles/status',{id:second.id,status:'active'})).status,200);
+assert.equal((await (await fetch(base+'/api/raffle')).json()).raffles.length,2);assert.equal((await post('/api/admin/raffles/status',{id:second.id,status:'draft'})).status,200);
 assert.equal((await post('/api/admin/raffles/dates',{id:saved.id,startsAt:input.startsAt,endsAt:input.startsAt,drawAt:input.drawAt})).status,400);
 assert.equal((await post('/api/admin/raffles/dates',{id:saved.id,startsAt:'2030-02-30T09:00:00-06:00',endsAt:'2030-03-10T09:00:00-06:00',drawAt:'2030-03-11T09:00:00-06:00'})).status,400);
 assert.equal((await post('/api/admin/raffles/dates',{id:saved.id,startsAt:input.startsAt,endsAt:input.endsAt,drawAt:'2030-01-12T12:00:00-06:00'})).status,200);
@@ -242,6 +243,26 @@ const shown=(await (await fetch(base+'/api/raffle')).json()).raffle;assert.equal
 assert.equal((await edit({goalPercent:5,...{endsAt:mx(now+5*86400000),drawAt:mx(now+6*86400000)}})).status,200);
 const payment=await (await post('/api/payments/submit',{phone:'5512345678',tracking:'GOAL123456',receipt:{type:'image/png',base64:png}})).json();assert.equal((await post('/api/admin/payments/review',{id:payment.id,decision:'approved',reason:'Depósito verificado'})).status,200);
 assert.equal((await post('/api/admin/raffles/reschedule',{id:live,endsAt:mx(now+7*86400000),drawAt:mx(now+8*86400000)})).status,409);
+}finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;rmSync(dir,{recursive:true,force:true});}
+});
+
+test('several raffles sell at once with their own tickets and payments',async()=>{
+const dir=mkdtempSync(join(tmpdir(),'peso-multi-'));const base='http://localhost:3107';const proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env:{...process.env,PORT:'3107',NODE_ENV:'test',PUBLIC_ORIGIN:base,ADMIN_PASSWORD:'multi-test-password'}});
+let cookie='';const post=(path,data)=>fetch(base+path,{method:'POST',headers:{Origin:base,'Content-Type':'application/json',Cookie:cookie},body:JSON.stringify(data)});
+try{await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});
+cookie=await adminCookie(base,'multi-test-password');
+const first=await openSale(base,cookie,{ticketCount:10,price:'50'}),second=await openSale(base,cookie,{ticketCount:20,price:'20'});
+const all=await (await fetch(base+'/api/raffle')).json();assert.deepEqual(all.raffles.map(r=>r.id).sort(),[first,second].sort());assert.ok(all.raffles.every(r=>r.open));
+assert.equal((await (await fetch(`${base}/api/raffle?id=${first}`)).json()).raffle.id,first);assert.ok([first,second].includes((await (await fetch(`${base}/api/raffle?id=${'f'.repeat(24)}`)).json()).raffle.id));
+const buyer={name:'Multi User',phone:'5512345678'};
+assert.equal((await post('/api/reservations',{...buyer,raffle:first,numbers:[3]})).status,201);assert.equal((await post('/api/reservations',{...buyer,raffle:second,numbers:[3,15]})).status,201);
+assert.equal((await post('/api/reservations',{...buyer,raffle:first,numbers:[15]})).status,400);assert.equal((await post('/api/reservations',{...buyer,raffle:'f'.repeat(24),numbers:[1]})).status,409);
+assert.equal(isTaken(await (await fetch(`${base}/api/raffle?id=${first}`)).json(),3),1);assert.equal(isTaken(await (await fetch(`${base}/api/raffle?id=${second}`)).json(),15),1);
+assert.equal((await post('/api/tickets/random',{raffle:second,quantity:18})).status,200);assert.equal((await post('/api/tickets/random',{raffle:first,quantity:10})).status,409);
+const receipt={type:'image/png',base64:png};const ambiguous=await post('/api/payments/submit',{phone:buyer.phone,tracking:'MULTI12345',receipt});assert.equal(ambiguous.status,409);const choices=(await ambiguous.json()).choices;assert.equal(choices.length,2);assert.equal(choices.find(c=>c.raffle===second).amount_cents,4000);
+assert.equal((await post('/api/payments/submit',{phone:buyer.phone,tracking:'MULTI12345',raffle:second,receipt})).status,201);
+const results=(await (await post('/api/tickets/lookup',{method:'phone',value:buyer.phone})).json()).results;assert.deepEqual(results.map(r=>r.raffle).sort(),[first,second].sort());
+assert.equal((await post('/api/admin/raffles/status',{id:first,status:'closed'})).status,200);assert.deepEqual((await (await fetch(base+'/api/raffle')).json()).raffles.map(r=>r.id),[second]);
 }finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;rmSync(dir,{recursive:true,force:true});}
 });
 
