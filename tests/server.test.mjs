@@ -35,7 +35,7 @@ assert.equal((await fetch(base+'/',{method:'DELETE'})).status,405);
 assert.equal((await post('/api/reservations',null)).status,400);
 assert.equal((await post('/api/reservations',{numbers:'123'})).status,400);
 assert.equal((await post('/api/reservations',{}, {'Content-Type':'text/plain'})).status,415);
-assert.equal((await post('/api/reservations',{name:'x'.repeat(9000)})).status,413);
+assert.equal((await post('/api/reservations',{name:'x'.repeat(1200000)})).status,413);
 assert.equal((await fetch(base+'/api/admin/reservations')).status,401);
 assert.equal((await post('/api/reservations',{name:'Test User',phone:'5512345678',numbers:[5]},{Origin:'https://example.com'})).status,403);
 assert.equal((await post('/api/reservations',{name:'Test User',phone:'5512345678',numbers:[100]})).status,400);
@@ -71,7 +71,8 @@ assert.equal((await post('/api/admin/logout',{}, {Cookie:cookie})).status,200);
 assert.equal((await fetch(base+'/api/admin/reservations',{headers:{Cookie:cookie}})).status,401);
 const ten={name:'Pending User',phone:'5512345679',numbers:[10,11,12,13,14,15,16,17,18,19]};
 assert.equal((await post('/api/reservations',ten)).status,201);
-assert.equal((await post('/api/reservations',{...ten,numbers:[20]})).status,429);
+// No per-person cap: an eleventh ticket simply joins the same pending reservation.
+const eleven=await post('/api/reservations',{...ten,numbers:[20]});assert.equal(eleven.status,201);assert.equal((await eleven.json()).numbers.length,11);
 for(let i=0;i<4;i++)assert.equal((await post('/api/login',{password:'wrong'})).status,401);
 const throttled=await post('/api/login',{password:'wrong'}, {'X-Forwarded-For':'1.2.3.4'});assert.equal(throttled.status,429);assert.ok(Number(throttled.headers.get('retry-after'))>0);
 for(let i=0;i<30;i++)await lookup('phone','5599999999');assert.equal((await lookup('phone',data.phone)).status,429);
@@ -120,7 +121,8 @@ try{
 await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});
 assert.equal((await draw(3)).status,409);
 await openSale(base,await adminCookie(base,'lucky-test-password'));
-for(const quantity of [0,11,-1,1.5,'3',null])assert.equal((await draw(quantity)).status,400);
+for(const quantity of [0,101,-1,1.5,'3',null])assert.equal((await draw(quantity)).status,400);
+const many=await draw(40);assert.equal(many.status,200);assert.equal(new Set((await many.json()).numbers).size,40);
 assert.equal((await post('/api/tickets/random',{quantity:3},'https://evil.example')).status,403);
 for(let i=0;i<5;i++){const r=await draw(10);assert.equal(r.status,200);const data=await r.json();assert.equal(data.numbers.length,10);assert.equal(new Set(data.numbers).size,10);assert.ok(data.numbers.every(n=>Number.isInteger(n)&&n>=0&&n<100));}
 assert.ok(Buffer.from((await (await fetch(base+'/api/raffle')).json()).taken,'base64').every(byte=>byte===0));
