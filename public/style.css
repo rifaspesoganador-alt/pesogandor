@@ -172,3 +172,21 @@ body{transition:background-color .35s,color .35s}
 :root[data-theme=light] .raffle-tab{background:#fff;box-shadow:0 8px 22px #2b451212}
 :root[data-theme=light] .raffle-tab[aria-pressed=true]{box-shadow:0 0 0 2px #4a7a0633,0 14px 30px #2b45121f}
 :root[data-theme=light] .raffle-tab-price{color:#a77b12}
+/* Letras: Anton (titulares y números) y Poppins (texto), servidas desde /fonts. */
+@font-face{font-family:Anton;src:url(/fonts/anton-400.woff2) format('woff2');font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:Poppins;src:url(/fonts/poppins-400.woff2) format('woff2');font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:Poppins;src:url(/fonts/poppins-600.woff2) format('woff2');font-weight:500 600;font-style:normal;font-display:swap}
+@font-face{font-family:Poppins;src:url(/fonts/poppins-700.woff2) format('woff2');font-weight:700 900;font-style:normal;font-display:swap}
+:root{--display:Anton,Impact,'Arial Narrow Bold',sans-serif;--serif:var(--display)}
+body,button,input,select,textarea{font-family:Poppins,Arial,Helvetica,sans-serif}
+h1,h2,.raffle-prize,.lucky-copy h3,.payment-details h3,.published-raffle-card h3{font-family:var(--display);font-weight:400;font-synthesis:none;letter-spacing:.5px!important;line-height:1.04}
+h1 em,h2 em,h3 em{font-family:var(--display);font-style:normal;font-weight:400}
+h2 em,.raffle-prize em,.lucky-copy h3 em,.payment-details h3 em{color:var(--lime)}
+.raffle-stats strong,.raffle-countdown b,.checkout-total strong,.price,.selection-bar-info strong,.ribbon-ticket strong,.lookup-numbers span,.checkout-tickets span,.lucky-results span,.tickets button,.hero-countdown{font-family:var(--display);font-weight:400;font-style:normal;font-synthesis:none;letter-spacing:.6px}
+.raffle-stats strong{font-size:clamp(34px,5vw,58px)}
+.raffle-countdown b{font-size:38px}
+.tickets button{font-size:16px}
+.hero-countdown{font-size:16px;letter-spacing:1.5px}
+.lucky-results span.more,.checkout-tickets span.more{font:600 13px Poppins,Arial,sans-serif}
+.number-ribbon{font-style:normal;letter-spacing:2px}
+@media(max-width:700px){.raffle-countdown b{font-size:28px}.tickets button{font-size:15px}}
