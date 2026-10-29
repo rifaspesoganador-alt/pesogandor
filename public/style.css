@@ -156,3 +156,19 @@ body{transition:background-color .35s,color .35s}
 :root[data-theme=light] .site-header nav a:hover{background:#4a7a060f}:root[data-theme=light] .site-header nav a[aria-current]{background:#4a7a0612;border-color:#4a7a0633}
 
 .published-raffles{border-top:1px solid var(--line)}.published-raffle-card{display:grid;grid-template-columns:240px 1fr;gap:28px;padding:28px;border:1px solid #c9ae6938;border-radius:14px;margin-top:24px;background:#15201066}.published-raffle-card:not(:has(img)){grid-template-columns:1fr}.published-raffle-card img{width:100%;height:200px;object-fit:cover;border-radius:10px}.published-raffle-card h3{font-size:28px;overflow-wrap:anywhere}.published-description{white-space:pre-wrap;font-size:14px;line-height:1.8;color:var(--muted);overflow-wrap:anywhere}@media(max-width:600px){.published-raffle-card{grid-template-columns:1fr;padding:20px}}
+
+/* Raffle tabs: shown only when more than one raffle is on sale. */
+.raffle-switcher{margin:0 0 28px;text-align:center}.raffle-switcher .eyebrow{margin:0 0 14px}
+.raffle-tabs{display:flex;gap:14px;overflow-x:auto;padding:4px 2px 12px;scroll-snap-type:x mandatory;justify-content:safe center}
+.raffle-tab{flex:0 0 auto;display:flex;align-items:center;gap:12px;width:min(300px,78vw);padding:10px 16px 10px 10px;border:1px solid var(--line);border-radius:16px;background:#0e160d;color:var(--ink);text-align:left;cursor:pointer;scroll-snap-align:start;transition:transform .2s,border-color .2s,box-shadow .2s}
+.raffle-tab:hover{transform:translateY(-2px);border-color:#c5f85b66}
+.raffle-tab[aria-pressed=true]{border-color:var(--lime);box-shadow:0 0 0 2px #c5f85b55,0 14px 34px #0005}
+.raffle-tab img{width:58px;height:58px;flex:none;border-radius:10px;object-fit:cover;background:#ffffff10}
+.raffle-tab-text{display:grid;gap:3px;min-width:0}
+.raffle-tab strong{overflow:hidden;font-size:15px;line-height:1.25;white-space:nowrap;text-overflow:ellipsis}
+.raffle-tab-price{font-size:13px;font-weight:600;color:#e8c777}
+.raffle-tab small{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}
+.raffle-tab[aria-pressed=true] small{color:var(--lime)}
+:root[data-theme=light] .raffle-tab{background:#fff;box-shadow:0 8px 22px #2b451212}
+:root[data-theme=light] .raffle-tab[aria-pressed=true]{box-shadow:0 0 0 2px #4a7a0633,0 14px 30px #2b45121f}
+:root[data-theme=light] .raffle-tab-price{color:#a77b12}
