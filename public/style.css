@@ -50,7 +50,8 @@ body.has-selection{padding-bottom:96px}
 .raffle-badge{display:inline-flex;align-items:center;gap:9px;margin:0 0 24px;padding:7px 15px;border:1px solid #c5f85b44;border-radius:30px}
 .live-dot{width:7px;height:7px;border-radius:50%;background:var(--lime);animation:live 1.6s infinite}
 @keyframes live{0%{box-shadow:0 0 0 0 #c5f85b99}70%,100%{box-shadow:0 0 0 9px #c5f85b00}}
-.raffle-photo{display:block;width:100%;max-height:380px;margin:0 0 30px;border-radius:16px;object-fit:cover}
+/* The prize artwork is shown whole (never cropped), keeping its own proportions. */
+.raffle-photo{display:block;width:auto;max-width:100%;height:auto;max-height:min(72vh,680px);margin:0 auto 30px;border-radius:16px;object-fit:contain;box-shadow:0 18px 50px #0005}
 .raffle-prize{margin:0 auto 14px;font:italic 400 clamp(54px,9vw,128px)/1.02 var(--serif);letter-spacing:-3px;background:linear-gradient(100deg,#eefbd4 0%,var(--lime) 42%,#e8c777 85%);-webkit-background-clip:text;background-clip:text;color:transparent;overflow-wrap:anywhere}
 .raffle-desc{max-width:660px;margin:0 auto 32px;font-size:18px;line-height:1.7;color:#d8e3cb;white-space:pre-wrap;overflow-wrap:anywhere}
 .raffle-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;max-width:780px;margin:0 auto 26px}
