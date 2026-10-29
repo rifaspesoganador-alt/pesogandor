@@ -28,6 +28,7 @@ assert.equal((await fetch(base+'/')).status,200);
 assert.equal((await fetch(base+'/',{method:'HEAD'})).status,200);
 assert.equal((await fetch(base+'/.env')).status,404);
 const css=await fetch(base+'/style.css');const etag=css.headers.get('etag');assert.ok(etag);assert.equal(css.headers.get('cache-control'),'no-cache');assert.equal((await fetch(base+'/style.css',{headers:{'If-None-Match':etag}})).status,304);
+const font=await fetch(base+'/fonts/anton-400.woff2');assert.equal(font.status,200);assert.equal(font.headers.get('content-type'),'font/woff2');assert.equal(font.headers.get('cache-control'),'public, max-age=604800');
 const logo=await fetch(base+'/logo-small.png');assert.equal(logo.status,200);assert.equal(logo.headers.get('cache-control'),'public, max-age=604800');assert.equal((await fetch(base+'/api/raffle')).headers.get('cache-control'),'no-store');
 assert.equal((await fetch(base+'/data/peso.db')).status,404);
 assert.equal((await fetch(base+'/constructor')).status,404);
