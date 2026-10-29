@@ -16,7 +16,7 @@ Cada rifa tiene una meta de venta (80% de los boletos pagados por defecto, edita
 
 ## Flujo del participante
 
-Elige hasta 10 boletos (o usa la maquinita de la suerte), registra nombre, teléfono y correo opcional y ve el total a pagar. No hay folios: el teléfono identifica el apartado. Si vuelve a apartar con el mismo teléfono, los boletos se suman a su apartado pendiente (máximo 10 pendientes); mientras tenga un comprobante en revisión no puede apartar más. Paga a la cuenta publicada y envía el comprobante (JPG, PNG o PDF, máximo 5 MB) con su teléfono y clave de rastreo o referencia. Mientras el comprobante está en revisión, los boletos quedan apartados 48 horas. En «Mis boletos» busca por nombre, teléfono o correo y ve todos sus apartados (números, estado y total, sin datos personales).
+Elige los boletos que quiera (o escribe cuántos en la maquinita de la suerte), registra nombre, teléfono y correo opcional y ve el total a pagar. No hay folios: el teléfono identifica el apartado. Si vuelve a apartar con el mismo teléfono, los boletos se suman a su apartado pendiente; mientras tenga un comprobante en revisión no puede apartar más. Paga a la cuenta publicada y envía el comprobante (JPG, PNG o PDF, máximo 5 MB) con su teléfono y clave de rastreo o referencia. Mientras el comprobante está en revisión, los boletos quedan apartados 48 horas. En «Mis boletos» busca por nombre, teléfono o correo y ve todos sus apartados (números, estado y total, sin datos personales).
 
 ## Validación de pagos
 
@@ -38,7 +38,7 @@ Si además configura `N8N_WEBHOOK_URL`, al aprobar un pago el servidor envía un
 
 ## Límites anti-abuso
 
-Cada visitante (por IP, tomada del encabezado que agrega Traefik con `TRUST_PROXY=1`) puede hacer por minuto: 20 apartados, 20 consultas, 10 comprobantes y 60 sorteos de la maquinita. Además hay un tope general por minuto para todo el sitio: 600 apartados, 600 consultas, 300 comprobantes y 1,200 sorteos. Cada apartado admite hasta 10 boletos y cada teléfono hasta 10 boletos pendientes de pago por rifa.
+Cada visitante (por IP, tomada del encabezado que agrega Traefik con `TRUST_PROXY=1`) puede hacer por minuto: 20 apartados, 20 consultas, 10 comprobantes y 60 sorteos de la maquinita. Además hay un tope general por minuto para todo el sitio: 600 apartados, 600 consultas, 300 comprobantes y 1,200 sorteos. No hay tope de boletos por persona: cada quien aparta los que quiera (la maquinita acepta cualquier cantidad disponible) y lo que aparte de nuevo con el mismo teléfono se suma a su apartado pendiente.
 
 ## Despliegue en VPS
 
