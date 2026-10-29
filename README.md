@@ -4,6 +4,8 @@ Sitio de rifas con interfaz pública `/` y administración `/CFAD`. Node.js 24, 
 
 Configure `ADMIN_PASSWORD` antes del primer arranque para crear el acceso administrativo. Después, la contraseña protegida se conserva en SQLite y se cambia desde el panel. No guarde contraseñas en Git. `PORT` es opcional (3000 por defecto). Para producción, configure `PUBLIC_ORIGIN=https://pesoganador.com` y un proxy HTTPS que reenvíe al servicio. Fuera de Docker el servicio solo escucha en 127.0.0.1 (`HOST` permite cambiarlo).
 
+Las letras del sitio (Anton para titulares y números, Poppins para el texto) están en `public/fonts`; ambas tienen licencia libre SIL Open Font License y se sirven desde el propio servidor.
+
 ## Cómo poner a la venta una rifa
 
 1. Entra a `/CFAD` y, en **Datos de pago**, guarda banco, titular y al menos una CLABE, cuenta o tarjeta. También puedes indicar WhatsApp, instrucciones y cuántas horas tiene la gente para pagar (1 a 72; 24 por defecto). El sitio muestra en rojo que el concepto debe llevar nombre o celular. Sin estos datos el sitio no vende boletos.
