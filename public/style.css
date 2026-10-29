@@ -78,6 +78,46 @@ body.has-selection{padding-bottom:96px}
 .lucky-results span.landed{border-color:var(--lime);box-shadow:0 0 22px #c5f85b33;animation:ticket-land .5s cubic-bezier(.2,1.6,.4,1)}
 @keyframes ticket-land{0%{transform:scale(.6) rotate(-8deg)}60%{transform:scale(1.2)}100%{transform:scale(1)}}
 
+/* Cuenta regresiva bajo el botón principal. */
+.hero-countdown{margin:16px 0 0;font-size:12px;letter-spacing:1px;color:var(--lime);font-variant-numeric:tabular-nums}
+
+/* Botones Copiar para CLABE, cuenta, titular y total. */
+.copy-button{flex-shrink:0;padding:7px 13px;border:1px solid var(--lime);border-radius:20px;background:transparent;color:var(--lime);font-size:11px;font-weight:600;cursor:pointer;transition:background .2s,color .2s}
+.copy-button:hover{background:#c5f85b14}.copy-button.is-copied{background:var(--lime);color:var(--paper)}
+.payment-details dd{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+
+/* Compra guiada en tres pasos: ventana centrada en escritorio y hoja inferior en celular. */
+.checkout{width:min(560px,calc(100% - 24px));max-height:calc(100dvh - 24px);overflow:auto;padding:30px 28px 26px;border:1px solid #c9ae6955;border-radius:22px;background:#0f170e;color:var(--ink);box-shadow:0 30px 100px #000a}
+.checkout::backdrop{background:#000b;backdrop-filter:blur(4px)}
+.checkout[open]{animation:sheet-in .35s cubic-bezier(.2,.8,.2,1)}
+@keyframes sheet-in{from{opacity:0;transform:translateY(28px) scale(.98)}}
+.checkout-close{position:absolute;top:14px;right:14px;width:38px;height:38px;border:1px solid var(--line);border-radius:50%;background:transparent;color:var(--ink);font-size:22px;line-height:1;cursor:pointer}
+.checkout-steps{display:flex;gap:8px;margin:0 50px 22px 0;padding:0;list-style:none}
+.checkout-steps li{flex:1;padding-top:10px;border-top:3px solid var(--line);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);transition:border-color .3s,color .3s}
+.checkout-steps li.is-current,.checkout-steps li.is-done{border-color:var(--lime);color:var(--ink)}
+.checkout h2{margin:8px 0 18px;font-size:clamp(30px,6vw,40px);letter-spacing:-1px}
+.checkout form{margin:0;padding:0;border:0;background:none;box-shadow:none}.checkout form:before,.checkout form:after{display:none}
+.checkout .fields{display:grid;gap:14px}.checkout .fields .button{justify-content:space-between;margin-top:4px}
+.checkout-tickets{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.checkout-tickets span{padding:9px 13px;border-radius:9px;background:var(--lime);color:#152007;font:italic 20px var(--serif)}
+.checkout-total{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-bottom:18px;padding:14px 16px;border:1px solid #e8c77755;border-radius:14px;background:#e8c7770d}
+.checkout-total span{flex:1 1 140px;font-size:12px;color:var(--muted)}.checkout-total strong{font-size:28px;color:#e8c777;font-variant-numeric:tabular-nums}
+.checkout-deadline{margin:0 0 16px;font-size:13px;line-height:1.7;color:var(--muted)}
+.checkout-account{display:grid;gap:10px;margin:0 0 6px}
+.checkout-account div{padding:11px 14px;border:1px solid var(--line);border-radius:12px}
+.checkout-account dt{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}
+.checkout-account dd{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 0;font-size:15px;font-weight:600;overflow-wrap:anywhere}
+.checkout-account code{font-size:16px;letter-spacing:.5px;color:var(--lime)}
+.checkout .payment-warning{margin:16px 0;font-size:13px}
+.checkout-actions{display:grid;gap:10px}.checkout-actions .button{justify-content:space-between}
+.checkout-message{min-height:1.4em;margin:12px 0 0;font-size:13px;line-height:1.6;color:#e8c777}
+.remember{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted)}.remember input{width:18px;height:18px;padding:0;flex-shrink:0;accent-color:var(--lime)}
+.checkout-done{text-align:center}.checkout-done p{font-size:14px;line-height:1.8;color:var(--muted)}
+.checkout-check{display:grid;place-items:center;width:64px;height:64px;margin:6px auto 4px;border-radius:50%;background:var(--lime);color:#152007;font-size:32px;font-weight:700;animation:ticket-land .5s cubic-bezier(.2,1.6,.4,1)}
+.lookup-card .button{margin-top:6px}
+@media(max-width:600px){.checkout{width:100%;max-width:100%;max-height:92dvh;margin:auto 0 0;padding:24px 18px 22px;border-radius:22px 22px 0 0}.checkout[open]{animation-name:sheet-up}.checkout-total strong{font-size:24px}}
+@keyframes sheet-up{from{transform:translateY(100%)}}
+
 /* Modo claro: mismos verdes de la marca sobre fondo claro. */
 body{transition:background-color .35s,color .35s}
 :root[data-theme=light]{--lime:#4a7a06;--ink:#16210f;--muted:#5a6852;--paper:#f5f7ef;--line:#2b45122b;color-scheme:light}
@@ -109,6 +149,10 @@ body{transition:background-color .35s,color .35s}
 :root[data-theme=light] .raffle-stats div{background:#f7f9f2}:root[data-theme=light] .raffle-stats .gold strong,:root[data-theme=light] .raffle-countdown-label{color:#a77b12}
 :root[data-theme=light] .raffle-progress{background:#2b45121a}:root[data-theme=light] .raffle-countdown div{background:#4a7a060d;border-color:#4a7a0633}
 :root[data-theme=light] .lucky-results span.rolling{color:#a77b12}
+:root[data-theme=light] .checkout{background:#fff;box-shadow:0 30px 90px #2b451233}:root[data-theme=light] .checkout form{background:none;box-shadow:none}:root[data-theme=light] .checkout::backdrop{background:#16210f80}
+:root[data-theme=light] .checkout-tickets span{color:#fff}:root[data-theme=light] .checkout-check{color:#fff}
+:root[data-theme=light] .checkout-total{background:#f3e6c240;border-color:#a77b1255}:root[data-theme=light] .checkout-total strong,:root[data-theme=light] .checkout-message{color:#8a6510}
+:root[data-theme=light] .copy-button:hover{background:#4a7a0612}:root[data-theme=light] .copy-button.is-copied{color:#fff}
 :root[data-theme=light] .site-header nav a:hover{background:#4a7a060f}:root[data-theme=light] .site-header nav a[aria-current]{background:#4a7a0612;border-color:#4a7a0633}
 
 .published-raffles{border-top:1px solid var(--line)}.published-raffle-card{display:grid;grid-template-columns:240px 1fr;gap:28px;padding:28px;border:1px solid #c9ae6938;border-radius:14px;margin-top:24px;background:#15201066}.published-raffle-card:not(:has(img)){grid-template-columns:1fr}.published-raffle-card img{width:100%;height:200px;object-fit:cover;border-radius:10px}.published-raffle-card h3{font-size:28px;overflow-wrap:anywhere}.published-description{white-space:pre-wrap;font-size:14px;line-height:1.8;color:var(--muted);overflow-wrap:anywhere}@media(max-width:600px){.published-raffle-card{grid-template-columns:1fr;padding:20px}}
