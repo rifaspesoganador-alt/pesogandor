@@ -1,7 +1,7 @@
 import http from 'node:http';
 import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync,readFileSync} from 'node:fs';
-import {randomBytes,randomInt} from 'node:crypto';
+import {createHash,randomBytes,randomInt} from 'node:crypto';
 import {credentialStore} from './credentials.mjs';
 process.umask(0o077);
 const production=process.env.NODE_ENV==='production';
@@ -66,6 +66,11 @@ sendWhatsApp(r.phone,text).then(()=>audit('whatsapp_sent',r.id)).catch(error=>{a
 if(hook){const headers={'Content-Type':'application/json'};if(process.env.N8N_WEBHOOK_SECRET)headers['X-Peso-Secret']=process.env.N8N_WEBHOOK_SECRET;
 fetch(hook,{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(10000)}).then(res=>{if(!res.ok)console.error('n8n_webhook_failed',res.status);}).catch(()=>console.error('n8n_webhook_failed'));}
 }
+// Static files and prize photos carry an ETag: browsers reuse their copy (304) until the content changes.
+// Images may be reused for a week without asking; pages, styles and scripts are revalidated on every visit.
+const staticCache=new Map(),etagOf=body=>`"${createHash('sha1').update(body).digest('base64url')}"`;
+function staticFile(name){let entry=staticCache.get(name);if(!entry){const body=readFileSync(new URL(`public/${name}`,import.meta.url));entry={body,etag:etagOf(body)};staticCache.set(name,entry);}return entry;}
+function sendCached(req,res,body,etag,type,maxAge){res.setHeader('Content-Type',type);res.setHeader('ETag',etag);res.setHeader('Cache-Control',maxAge?`public, max-age=${maxAge}`:'no-cache');if(req.headers['if-none-match']===etag){res.writeHead(304);return res.end();}res.setHeader('Content-Length',body.length);return res.end(req.method==='HEAD'?undefined:body);}
 function send(res,status,value){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));}
 function expire(){const now=Date.now();db.prepare("DELETE FROM raffle_tickets WHERE reservation IN (SELECT id FROM reservations WHERE status='pending' AND expires < ?)").run(now);db.prepare("DELETE FROM tickets WHERE reservation IN (SELECT id FROM reservations WHERE status='pending' AND expires < ?)").run(now);db.prepare("UPDATE reservations SET status='expired' WHERE status='pending' AND expires < ?").run(now);}
 function problem(status,message){return Object.assign(Error(message),{status});}
@@ -143,7 +148,7 @@ if(req.method==='POST'||path.startsWith('/api/admin/'))expire();
 if(path==='/api/raffle'&&req.method==='GET'){const raffle=activeRaffle();if(!raffle)return send(res,200,{raffle:null,open:false,message:closedMessage(null),taken:''});return send(res,200,{raffle,open:salesOpen(raffle),message:salesOpen(raffle)?null:closedMessage(raffle),holdHours:holdMs()/3600000,maxPerPhone:MAX_PER_PHONE,taken:takenBitmap(raffle)});}
 if(path==='/api/payment-info'&&req.method==='GET')return send(res,200,paymentInfo());
 const publicPhoto=path.match(/^\/api\/raffles\/([a-f0-9]{24})\/photo$/);
-if(publicPhoto&&['GET','HEAD'].includes(req.method)){const row=db.prepare("SELECT photo,photo_type FROM raffles WHERE id=? AND status IN ('active','closed')").get(publicPhoto[1]);if(!row?.photo)return send(res,404,{error:'Foto no disponible'});res.setHeader('Content-Type',row.photo_type);return res.end(req.method==='HEAD'?undefined:Buffer.from(row.photo));}
+if(publicPhoto&&['GET','HEAD'].includes(req.method)){const row=db.prepare("SELECT photo,photo_type FROM raffles WHERE id=? AND status IN ('active','closed')").get(publicPhoto[1]);if(!row?.photo)return send(res,404,{error:'Foto no disponible'});const photo=Buffer.from(row.photo);return sendCached(req,res,photo,etagOf(photo),row.photo_type,0);}
 if(path==='/api/payments/submit'&&req.method==='POST'){
 limits(req,'payment_submit',300,10);const b=await body(req,Math.ceil(RECEIPT_MAX/3)*4+4096);
 if(typeof b.phone!=='string'||!/^\d{10}$/.test(b.phone)||typeof b.tracking!=='string'||b.tracking.length>100)return send(res,400,{error:'Revisa tu teléfono y la clave de rastreo.'});
@@ -276,8 +281,8 @@ if(path==='/api/admin/logout'&&req.method==='POST'){sessions.delete(token(req));
 if(path==='/api/admin/reservations'&&req.method==='GET')return send(res,200,db.prepare('SELECT r.*,f.prize FROM reservations r LEFT JOIN raffles f ON f.id=r.raffle ORDER BY r.created DESC LIMIT 500').all());
 if(path==='/api/admin/confirm'&&req.method==='POST')return send(res,410,{error:'Revisa el comprobante y registra el motivo desde Pagos por revisar.'});
 }
-const files={'/':'index.html','/CFAD':'admin.html','/CFAD/':'admin.html','/app.js':'app.js','/theme.js':'theme.js','/admin.js':'admin.js','/style.css':'style.css','/admin.css':'admin.css','/logo.png':'logo.png','/favicon.ico':'favicon.ico','/favicon-32.png':'favicon-32.png','/favicon-192.png':'favicon-192.png','/apple-touch-icon.png':'apple-touch-icon.png'};
-if(['GET','HEAD'].includes(req.method)&&Object.hasOwn(files,path)){res.setHeader('Content-Type',path.endsWith('.png')?'image/png':path.endsWith('.ico')?'image/x-icon':path.endsWith('.js')?'text/javascript; charset=utf-8':path.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8');return res.end(req.method==='HEAD'?undefined:readFileSync(new URL(`public/${files[path]}`,import.meta.url)));}
+const files={'/':'index.html','/CFAD':'admin.html','/CFAD/':'admin.html','/app.js':'app.js','/theme.js':'theme.js','/admin.js':'admin.js','/style.css':'style.css','/admin.css':'admin.css','/logo.png':'logo.png','/logo-small.png':'logo-small.png','/favicon.ico':'favicon.ico','/favicon-32.png':'favicon-32.png','/favicon-192.png':'favicon-192.png','/apple-touch-icon.png':'apple-touch-icon.png'};
+if(['GET','HEAD'].includes(req.method)&&Object.hasOwn(files,path)){const {body:file,etag}=staticFile(files[path]),image=/\.(png|ico)$/.test(path);return sendCached(req,res,file,etag,path.endsWith('.png')?'image/png':path.endsWith('.ico')?'image/x-icon':path.endsWith('.js')?'text/javascript; charset=utf-8':path.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8',image?604800:0);}
 send(res,404,{error:'No encontrado'});
 }catch(error){if(error.retry)res.setHeader('Retry-After',String(error.retry));if(!error.status)console.error('request_failed');send(res,error.status||500,{error:error.status?error.message:'Error interno'});}
 });
