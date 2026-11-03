@@ -156,9 +156,12 @@ assert.equal((await post('/api/admin/raffles/status',{id:saved.id,status:'publis
 assert.equal((await post('/api/admin/raffles/status',{id:saved.id,status:'active'})).status,200);
 let current=await (await fetch(base+'/api/raffle')).json();assert.equal(current.raffle.id,saved.id);assert.equal(current.raffle.price_cents,7525);assert.equal(current.open,false);assert.match(current.message,/datos de pago/);assert.equal((await fetch(base+publicPhotoPath)).status,200);
 assert.equal(await (await fetch(base+'/api/payment-info')).json(),null);
-for(const change of [{bank:''},{holder:''},{clabe:'123'},{clabe:'',account:'',card:''},{card:'1234'},{whatsapp:'12'},{holdHours:0},{holdHours:73},{holdHours:'2'}])assert.equal((await post('/api/admin/payment-settings',{...bank,...change})).status,400);
+for(const change of [{bank:''},{holder:''},{clabe:'123'},{clabe:'',account:'',card:''},{card:'1234'},{whatsapp:'12'},{group:'https://example.com/grupo'},{group:'javascript:alert(1)'},{group:5},{holdHours:0},{holdHours:73},{holdHours:'2'}])assert.equal((await post('/api/admin/payment-settings',{...bank,...change})).status,400);
 assert.equal((await post('/api/admin/payment-settings',{...bank,clabe:'012 345 678 901 234 567'})).status,200);
 assert.equal((await (await fetch(base+'/api/payment-info')).json()).clabe,'012345678901234567');
+assert.equal((await (await fetch(base+'/api/payment-info')).json()).group,'');
+assert.equal((await post('/api/admin/payment-settings',{...bank,group:'https://chat.whatsapp.com/AbCdEf123456'})).status,200);
+assert.equal((await (await fetch(base+'/api/payment-info')).json()).group,'https://chat.whatsapp.com/AbCdEf123456');
 current=await (await fetch(base+'/api/raffle')).json();assert.equal(current.open,false);assert.match(current.message,/aún no comienza/);
 assert.equal((await post('/api/reservations',{name:'Early User',phone:'5512345678',numbers:[1]})).status,409);
 const second=await (await post('/api/admin/raffles',{...input,photo:null})).json();assert.equal((await post('/api/admin/raffles/status',{id:second.id,status:'active'})).status,200);
