@@ -6,7 +6,7 @@ menuToggle.onclick=()=>setMenu(!document.body.classList.contains('menu-open'));m
 document.addEventListener('keydown',event=>{if(event.key==='Escape')setMenu(false);});
 for(const link of document.querySelectorAll('#site-menu a'))link.addEventListener('click',()=>setMenu(false));
 // Highlights the menu entry of the section crossing the middle of the screen.
-const navLinks=[...document.querySelectorAll('.site-header nav a:not(.nav-group)')];
+const navLinks=[...document.querySelectorAll('.site-header nav a')];
 const sectionObserver=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting)for(const link of navLinks){if(link.hash==='#'+entry.target.id)link.setAttribute('aria-current','location');else link.removeAttribute('aria-current');}},{rootMargin:'-45% 0px -50% 0px'});
 for(const link of navLinks){const section=document.querySelector(link.hash);if(section)sectionObserver.observe(section);}
 // Light/dark switch; theme.js already applied the saved choice before paint.
@@ -134,4 +134,4 @@ window.addEventListener('pagehide',()=>{paymentForm.reset();resetPaymentRaffle()
 function prefillAll(){const buyer=savedBuyer();if(!buyer)return;prefill(document.querySelector('#reserve'));if(!paymentForm.elements.phone.value)paymentForm.elements.phone.value=buyer.phone||'';if(lookup.elements.method.value==='phone'&&!lookupValue.value)lookupValue.value=buyer.phone||'';lastPhone=lastPhone||buyer.phone||'';}
 prefillAll();window.addEventListener('pageshow',prefillAll);
 
-async function loadPaymentInfo(){try{const r=await fetch('/api/payment-info');if(!r.ok)return;const info=await r.json();if(!info)return;paymentInfo=info;holdHours=info.holdHours||holdHours;if(info.group){const group=document.querySelector('#nav-group');group.href=info.group;group.hidden=false;}document.querySelector('#payment-warning').textContent=conceptWarning();renderAccount(document.querySelector('#payment-info'));document.querySelector('#payment-instructions').textContent=info.instructions||'Después de pagar, envía tu comprobante en el formulario de abajo.';}catch{ /* The default text already asks people to wait for the payment details. */ }}loadPaymentInfo();
+async function loadPaymentInfo(){try{const r=await fetch('/api/payment-info');if(!r.ok)return;const info=await r.json();if(!info)return;paymentInfo=info;holdHours=info.holdHours||holdHours;document.querySelector('#payment-warning').textContent=conceptWarning();renderAccount(document.querySelector('#payment-info'));document.querySelector('#payment-instructions').textContent=info.instructions||'Después de pagar, envía tu comprobante en el formulario de abajo.';}catch{ /* The default text already asks people to wait for the payment details. */ }}loadPaymentInfo();
