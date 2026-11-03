@@ -8,7 +8,7 @@ Las letras del sitio (Anton para titulares y números, Poppins para el texto) es
 
 ## Cómo poner a la venta una rifa
 
-1. Entra a `/CFAD` y, en **Datos de pago**, guarda banco, titular y al menos una CLABE, cuenta o tarjeta. También puedes indicar WhatsApp, el enlace de invitación de tu grupo de WhatsApp (`https://chat.whatsapp.com/…`; aparece en el menú del sitio como «Grupo de WhatsApp»), instrucciones y cuántas horas tiene la gente para pagar (1 a 72; 24 por defecto). El sitio muestra en rojo que el concepto debe llevar nombre o celular. Sin estos datos el sitio no vende boletos.
+1. Entra a `/CFAD` y, en **Datos de pago**, guarda banco, titular y al menos una CLABE, cuenta o tarjeta. También puedes indicar WhatsApp, instrucciones y cuántas horas tiene la gente para pagar (1 a 72; 24 por defecto). El sitio muestra en rojo que el concepto debe llevar nombre o celular. Sin estos datos el sitio no vende boletos.
 2. Pulsa **Nueva rifa**: premio, descripción, precio, cantidad de boletos (máximo 100,000; el sitio los muestra en páginas de 1,000 con buscador de número), fechas de inicio, cierre y sorteo (hora del centro de México) y foto opcional. Se guarda como borrador.
 3. Pulsa **Poner en venta**. Puede haber varias rifas en venta al mismo tiempo: el sitio las muestra como pestañas («Elige tu rifa») y cada una tiene sus propios boletos, numeración y precio. Los boletos se pueden apartar entre el inicio y el cierre de cada rifa. **Cerrar ventas** detiene nuevos apartados y conserva los existentes.
 
@@ -33,6 +33,21 @@ Al aprobar un pago, la página manda un WhatsApp al participante con sus boletos
 - `WAHA_SESSION`: nombre de la sesión conectada en WAHA (`default` si no se indica).
 
 Antes de enviar, la página pregunta a WAHA el chat correcto del número (en México puede ser 52 o 521 + 10 dígitos). Si WhatsApp o WAHA fallan, el pago queda aprobado igualmente; el resultado se registra en la auditoría (`whatsapp_sent` o `whatsapp_failed`) y en `docker compose logs web`.
+
+### Grupo de administradores (bot)
+
+En el grupo de WhatsApp de administradores (por ejemplo «rifas admin»), con el número de WAHA como integrante, cualquier integrante puede escribir:
+
+- `menu`: muestra los comandos.
+- `corte` (o `1`): resumen de cada rifa en venta (y de las cerradas con sorteo pendiente): boletos vendidos y cobrado, en revisión, sin pagar, disponibles, avance de la meta, total cobrado y comprobantes por revisar.
+- `boletos` (o `2`): números vendidos y, por persona, los boletos pendientes con nombre, teléfono, monto y si están en revisión o cuándo vencen.
+
+El bot solo contesta en ese grupo. Para activarlo, agregue al `.env` de la página:
+
+- `WAHA_ADMIN_GROUP`: el id del grupo en WAHA (termina en `@g.us`).
+- `WAHA_WEBHOOK_SECRET`: una clave larga y aleatoria, por ejemplo la salida de `openssl rand -hex 32`.
+
+Luego, en WAHA, configure en la sesión un webhook hacia `https://pesoganador.com/api/waha/webhook` con el evento `message` (o `message.any` si también escribe desde el teléfono de WAHA) y el encabezado personalizado `X-Peso-Secret` con el mismo valor de `WAHA_WEBHOOK_SECRET`. Sin esas dos variables, la dirección del webhook responde 404.
 
 ## Aviso opcional a n8n
 

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync,readFileSync} from 'node:fs';
-import {createHash,randomBytes,randomInt} from 'node:crypto';
+import {createHash,randomBytes,randomInt,timingSafeEqual} from 'node:crypto';
 import {credentialStore} from './credentials.mjs';
 process.umask(0o077);
 const production=process.env.NODE_ENV==='production';
@@ -51,14 +51,51 @@ function takenNumbers(raffleId){return db.prepare('SELECT number FROM raffle_tic
 function takenBitmap(raffle){const bits=Buffer.alloc(Math.ceil(raffle.ticket_count/8));for(const n of takenNumbers(raffle.id))bits[n>>3]|=1<<(n&7);return bits.toString('base64');}
 const money=cents=>new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(cents/100);
 // Sends a WhatsApp text through WAHA (WhatsApp HTTP API).
+function waha(){const headers={'Content-Type':'application/json',Accept:'application/json'};if(process.env.WAHA_API_KEY)headers['X-Api-Key']=process.env.WAHA_API_KEY;return {base:(process.env.WAHA_URL||'').replace(/\/+$/,''),session:process.env.WAHA_SESSION||'default',headers};}
+async function wahaText(chatId,text){const {base,session,headers}=waha();const res=await fetch(`${base}/api/sendText`,{method:'POST',headers,body:JSON.stringify({session,chatId,text}),signal:AbortSignal.timeout(15000)});if(!res.ok)throw problem(res.status,'waha_send_failed');}
 async function sendWhatsApp(phone,text){
-const base=(process.env.WAHA_URL||'').replace(/\/+$/,''),session=process.env.WAHA_SESSION||'default';
-const headers={'Content-Type':'application/json',Accept:'application/json'};if(process.env.WAHA_API_KEY)headers['X-Api-Key']=process.env.WAHA_API_KEY;
+const {base,session,headers}=waha();
 // Mexican mobiles can be registered on WhatsApp as 52 or 521 + 10 digits; WAHA reports the real chat id.
 let chatId=`52${phone}@c.us`;
 try{const check=await fetch(`${base}/api/contacts/check-exists?phone=52${phone}&session=${encodeURIComponent(session)}`,{headers,signal:AbortSignal.timeout(10000)});if(check.ok){const found=await check.json();if(found.numberExists===false)throw problem(404,'number_not_on_whatsapp');if(found.chatId)chatId=found.chatId;}}catch(error){if(error.status===404)throw error;}
-const res=await fetch(`${base}/api/sendText`,{method:'POST',headers,body:JSON.stringify({session,chatId,text}),signal:AbortSignal.timeout(15000)});if(!res.ok)throw problem(res.status,'waha_send_failed');
+await wahaText(chatId,text);
 }
+// Admin WhatsApp group: WAHA posts its messages to /api/waha/webhook and «menu», «corte» and «boletos» are answered there.
+// Only the group in WAHA_ADMIN_GROUP is answered, and only when the webhook carries WAHA_WEBHOOK_SECRET.
+const adminGroup=process.env.WAHA_ADMIN_GROUP||'',webhookSecret=process.env.WAHA_WEBHOOK_SECRET||'';
+const sha256=value=>createHash('sha256').update(value).digest();
+const validSecret=value=>typeof value==='string'&&timingSafeEqual(sha256(value),sha256(webhookSecret));
+const answered=new Map();
+const mxTime=ms=>new Date(ms).toLocaleString('es-MX',{timeZone:'America/Mexico_City',dateStyle:'medium',timeStyle:'short'});
+function botCommand(text){if(typeof text!=='string'||text.length>40)return null;const word=text.normalize('NFD').replace(/[̀-ͯ]/g,'').trim().toLowerCase().replace(/^[/!#.]+/,'');return {menu:'menu',ayuda:'menu',corte:'corte',boletos:'boletos',boleto:'boletos','1':'corte','2':'boletos'}[word]||null;}
+// Raffles on sale, plus closed ones whose draw is still ahead.
+function reportRaffles(){return db.prepare("SELECT id,prize,price_cents,ticket_count,status,COALESCE(goal_percent,80) AS goal FROM raffles WHERE status='active' OR (status='closed' AND draw_at>=?) ORDER BY created").all(Date.now());}
+function raffleSales(raffle){
+const rows=db.prepare("SELECT r.name,r.phone,r.numbers,r.status,r.amount_cents,r.expires,EXISTS(SELECT 1 FROM payment_submissions p WHERE p.reservation=r.id AND p.status='pending') AS review FROM reservations r WHERE r.raffle=? AND r.status IN ('paid','pending') ORDER BY r.created").all(raffle.id);
+const groups={paid:{count:0,cents:0,numbers:[]},review:{count:0,cents:0},unpaid:{count:0,cents:0},pending:[]};
+for(const row of rows){const numbers=JSON.parse(row.numbers),cents=row.amount_cents??numbers.length*raffle.price_cents,group=row.status==='paid'?groups.paid:row.review?groups.review:groups.unpaid;group.count+=numbers.length;group.cents+=cents;if(row.status==='paid')group.numbers.push(...numbers);else groups.pending.push({...row,numbers,cents});}
+return groups;}
+function ticketRanges(numbers,width){const sorted=[...numbers].sort((a,b)=>a-b),pad=n=>String(n).padStart(width,'0'),out=[];for(let i=0;i<sorted.length;i++){let j=i;while(j+1<sorted.length&&sorted[j+1]===sorted[j]+1)j++;out.push(j>i?`${pad(sorted[i])}-${pad(sorted[j])}`:pad(sorted[i]));i=j;}return out.join(', ');}
+function menuText(){return ['🎟️ *Peso Ganador · Menú*','','*1* o *corte*: resumen de ventas','*2* o *boletos*: boletos vendidos y pendientes','*menu*: este menú'].join('\n');}
+function corteText(){
+const raffles=reportRaffles(),lines=['📊 *Corte · Peso Ganador*',mxTime(Date.now())];let total=0;
+if(!raffles.length)lines.push('','No hay rifas en venta.');
+for(const raffle of raffles){const s=raffleSales(raffle),taken=s.paid.count+s.review.count+s.unpaid.count,goal=Math.ceil(raffle.ticket_count*raffle.goal/100);total+=s.paid.cents;
+lines.push('',`*${raffle.prize}*${raffle.status==='closed'?' (ventas cerradas)':''}`,`✅ Vendidos: ${s.paid.count} · ${money(s.paid.cents)}`,`🧾 En revisión: ${s.review.count} · ${money(s.review.cents)}`,`⏳ Sin pagar: ${s.unpaid.count} · ${money(s.unpaid.cents)}`,`🎟️ Disponibles: ${raffle.ticket_count-taken} de ${raffle.ticket_count}`,`🎯 Meta ${raffle.goal}%: ${s.paid.count} de ${goal} (${Math.floor(s.paid.count*100/goal)}%)`);}
+const reviews=db.prepare("SELECT COUNT(*) AS n FROM payment_submissions WHERE status='pending'").get().n;
+lines.push('',`💰 Total cobrado: ${money(total)}`,`📥 Comprobantes por revisar: ${reviews}`);return lines.join('\n');}
+function boletosTexts(){
+const raffles=reportRaffles();if(!raffles.length)return ['🎟️ No hay rifas en venta.'];
+return raffles.map(raffle=>{const s=raffleSales(raffle),width=Math.max(3,String(raffle.ticket_count-1).length),taken=s.paid.count+s.review.count+s.unpaid.count;
+const lines=[`🎟️ *Boletos · ${raffle.prize}*`,'',`✅ *Vendidos (${s.paid.count}):* ${s.paid.count?ticketRanges(s.paid.numbers,width):'ninguno'}`,'',`⏳ *Pendientes (${s.review.count+s.unpaid.count}):*${s.pending.length?'':' ninguno'}`];
+for(const r of s.pending)lines.push(`• ${r.name} · ${r.phone}: ${ticketRanges(r.numbers,width)} · ${money(r.cents)} · ${r.review?'🧾 en revisión':`vence ${mxTime(r.expires)}`}`);
+lines.push('',`🎟️ Disponibles: ${raffle.ticket_count-taken} de ${raffle.ticket_count}`);return lines.join('\n');});}
+// WhatsApp texts stay well under its limit; long lists are split on line breaks and capped at a few messages.
+function chunks(text){const max=3500,out=[];let current='';for(const line of text.split('\n'))for(const piece of line.match(/[^]{1,3500}/g)||['']){if(current&&current.length+piece.length+1>max){out.push(current);current=piece;}else current=current?`${current}\n${piece}`:piece;}if(current.trim())out.push(current);return out;}
+async function answerAdmin(command){
+let texts=command==='menu'?[menuText()]:command==='corte'?chunks(corteText()):boletosTexts().flatMap(text=>chunks(text));
+if(texts.length>6)texts=[...texts.slice(0,6),'… La lista sigue. Revisa el detalle completo en el panel, sección Participaciones.'];
+for(const text of texts)await wahaText(adminGroup,text);}
 // Confirms an approved payment by WhatsApp (WAHA) and/or n8n. Failures are logged and never undo the approval.
 function notifyApproved(reservationId){
 const waha=!!process.env.WAHA_URL,hook=process.env.N8N_WEBHOOK_URL;if(!waha&&!hook)return;
@@ -114,17 +151,14 @@ return {bytes,type:'application/pdf'};
 function paymentSettings(b){
 const text=(value,max)=>typeof value==='string'&&value.length<=max?value.trim():null;
 const digits=value=>typeof value==='string'?value.replace(/[\s-]/g,''):null;
-const info={bank:text(b.bank,80),holder:text(b.holder,120),clabe:digits(b.clabe),account:digits(b.account),card:digits(b.card),instructions:text(b.instructions,1000),whatsapp:digits(b.whatsapp),group:b.group==null?'':text(b.group,200),holdHours:b.holdHours};
+const info={bank:text(b.bank,80),holder:text(b.holder,120),clabe:digits(b.clabe),account:digits(b.account),card:digits(b.card),instructions:text(b.instructions,1000),whatsapp:digits(b.whatsapp),holdHours:b.holdHours};
 if(!info.bank||info.bank.length<2||!info.holder||info.holder.length<3)throw problem(400,'Indica el banco y el nombre del titular.');
-if(info.clabe===null||info.account===null||info.card===null||info.instructions===null||info.whatsapp===null||info.group===null)throw problem(400,'Revisa los datos de pago.');
+if(info.clabe===null||info.account===null||info.card===null||info.instructions===null||info.whatsapp===null)throw problem(400,'Revisa los datos de pago.');
 if(info.clabe&&!/^\d{18}$/.test(info.clabe))throw problem(400,'La CLABE debe tener 18 dígitos.');
 if(info.account&&!/^\d{6,20}$/.test(info.account))throw problem(400,'El número de cuenta debe tener de 6 a 20 dígitos.');
 if(info.card&&!/^\d{16}$/.test(info.card))throw problem(400,'La tarjeta debe tener 16 dígitos.');
 if(!info.clabe&&!info.account&&!info.card)throw problem(400,'Agrega al menos una CLABE, cuenta o tarjeta.');
-if(info.whatsapp&&!/^\d{10,15}$/.test(info.whatsapp))throw problem(400,'El WhatsApp debe tener de 10 a 15 dígitos.');
-// Only WhatsApp invite links: the public menu links here, so nothing else may be published through this field.
-if(info.group&&!/^https:\/\/chat\.whatsapp\.com\/[A-Za-z0-9]{10,40}$/.test(info.group))throw problem(400,'El enlace del grupo debe ser una invitación de WhatsApp (https://chat.whatsapp.com/…).');
-if(!Number.isInteger(info.holdHours)||info.holdHours<1||info.holdHours>72)throw problem(400,'El tiempo para pagar debe ser de 1 a 72 horas.');
+if(info.whatsapp&&!/^\d{10,15}$/.test(info.whatsapp))throw problem(400,'El WhatsApp debe tener de 10 a 15 dígitos.');if(!Number.isInteger(info.holdHours)||info.holdHours<1||info.holdHours>72)throw problem(400,'El tiempo para pagar debe ser de 1 a 72 horas.');
 return info;
 }
 const cookieName=production?'__Host-session':'session';
@@ -147,6 +181,17 @@ if(production)res.setHeader('Strict-Transport-Security','max-age=31536000');
 try{
 const path=new URL(req.url,'http://localhost').pathname;
 if(!['GET','HEAD','POST'].includes(req.method)){res.setHeader('Allow','GET, HEAD, POST');return send(res,405,{error:'Método no permitido'});}
+// WAHA calls this server to server, without a browser Origin, so it is checked by its shared secret before the Origin rule.
+if(path==='/api/waha/webhook'&&req.method==='POST'){
+if(!adminGroup||!webhookSecret||!process.env.WAHA_URL)return send(res,404,{error:'No encontrado'});
+if(!validSecret(req.headers['x-peso-secret']))return send(res,401,{error:'No autorizado'});
+const b=await body(req,2097152),m=b.payload;
+if(['message','message.any'].includes(b.event)&&m&&typeof m==='object'&&m.from===adminGroup){const command=botCommand(m.body),id=String(m.id||'');
+// WAHA may deliver one message twice (retries, or both message events); each id is answered once.
+const now=Date.now();for(const [key,until] of answered)if(until<=now)answered.delete(key);
+if(command&&!(id&&answered.has(id))){if(id)answered.set(id,now+600000);let allowed=true;try{limit('waha_bot',30,60000);}catch{allowed=false;}
+if(allowed){expire();answerAdmin(command).then(()=>audit('whatsapp_bot_'+command)).catch(error=>console.error('whatsapp_bot_failed',error.message));}}}
+return send(res,200,{ok:true});}
 if(req.method==='POST'){
 if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')return send(res,403,{error:'Origen no autorizado'});
 }
