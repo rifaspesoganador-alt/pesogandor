@@ -8,7 +8,7 @@ Las letras del sitio (Anton para titulares y números, Poppins para el texto) es
 
 ## Cómo poner a la venta una rifa
 
-1. Entra a `/CFAD` y, en **Datos de pago**, guarda banco, titular y al menos una CLABE, cuenta o tarjeta. También puedes indicar WhatsApp, instrucciones y cuántas horas tiene la gente para pagar (1 a 72; 24 por defecto). El sitio muestra en rojo que el concepto debe llevar nombre o celular. Sin estos datos el sitio no vende boletos.
+1. Entra a `/CFAD` y, en **Datos de pago**, guarda banco, titular y al menos una CLABE, cuenta o tarjeta. También puedes indicar WhatsApp, el enlace de invitación de tu grupo de WhatsApp (`https://chat.whatsapp.com/…`; aparece en el menú del sitio como «Grupo de WhatsApp»), instrucciones y cuántas horas tiene la gente para pagar (1 a 72; 24 por defecto). El sitio muestra en rojo que el concepto debe llevar nombre o celular. Sin estos datos el sitio no vende boletos.
 2. Pulsa **Nueva rifa**: premio, descripción, precio, cantidad de boletos (máximo 100,000; el sitio los muestra en páginas de 1,000 con buscador de número), fechas de inicio, cierre y sorteo (hora del centro de México) y foto opcional. Se guarda como borrador.
 3. Pulsa **Poner en venta**. Puede haber varias rifas en venta al mismo tiempo: el sitio las muestra como pestañas («Elige tu rifa») y cada una tiene sus propios boletos, numeración y precio. Los boletos se pueden apartar entre el inicio y el cierre de cada rifa. **Cerrar ventas** detiene nuevos apartados y conserva los existentes.
 

@@ -114,14 +114,16 @@ return {bytes,type:'application/pdf'};
 function paymentSettings(b){
 const text=(value,max)=>typeof value==='string'&&value.length<=max?value.trim():null;
 const digits=value=>typeof value==='string'?value.replace(/[\s-]/g,''):null;
-const info={bank:text(b.bank,80),holder:text(b.holder,120),clabe:digits(b.clabe),account:digits(b.account),card:digits(b.card),instructions:text(b.instructions,1000),whatsapp:digits(b.whatsapp),holdHours:b.holdHours};
+const info={bank:text(b.bank,80),holder:text(b.holder,120),clabe:digits(b.clabe),account:digits(b.account),card:digits(b.card),instructions:text(b.instructions,1000),whatsapp:digits(b.whatsapp),group:b.group==null?'':text(b.group,200),holdHours:b.holdHours};
 if(!info.bank||info.bank.length<2||!info.holder||info.holder.length<3)throw problem(400,'Indica el banco y el nombre del titular.');
-if(info.clabe===null||info.account===null||info.card===null||info.instructions===null||info.whatsapp===null)throw problem(400,'Revisa los datos de pago.');
+if(info.clabe===null||info.account===null||info.card===null||info.instructions===null||info.whatsapp===null||info.group===null)throw problem(400,'Revisa los datos de pago.');
 if(info.clabe&&!/^\d{18}$/.test(info.clabe))throw problem(400,'La CLABE debe tener 18 dígitos.');
 if(info.account&&!/^\d{6,20}$/.test(info.account))throw problem(400,'El número de cuenta debe tener de 6 a 20 dígitos.');
 if(info.card&&!/^\d{16}$/.test(info.card))throw problem(400,'La tarjeta debe tener 16 dígitos.');
 if(!info.clabe&&!info.account&&!info.card)throw problem(400,'Agrega al menos una CLABE, cuenta o tarjeta.');
 if(info.whatsapp&&!/^\d{10,15}$/.test(info.whatsapp))throw problem(400,'El WhatsApp debe tener de 10 a 15 dígitos.');
+// Only WhatsApp invite links: the public menu links here, so nothing else may be published through this field.
+if(info.group&&!/^https:\/\/chat\.whatsapp\.com\/[A-Za-z0-9]{10,40}$/.test(info.group))throw problem(400,'El enlace del grupo debe ser una invitación de WhatsApp (https://chat.whatsapp.com/…).');
 if(!Number.isInteger(info.holdHours)||info.holdHours<1||info.holdHours>72)throw problem(400,'El tiempo para pagar debe ser de 1 a 72 horas.');
 return info;
 }
