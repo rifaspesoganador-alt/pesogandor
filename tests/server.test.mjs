@@ -156,13 +156,9 @@ assert.equal((await post('/api/admin/raffles/status',{id:saved.id,status:'publis
 assert.equal((await post('/api/admin/raffles/status',{id:saved.id,status:'active'})).status,200);
 let current=await (await fetch(base+'/api/raffle')).json();assert.equal(current.raffle.id,saved.id);assert.equal(current.raffle.price_cents,7525);assert.equal(current.open,false);assert.match(current.message,/datos de pago/);assert.equal((await fetch(base+publicPhotoPath)).status,200);
 assert.equal(await (await fetch(base+'/api/payment-info')).json(),null);
-for(const change of [{bank:''},{holder:''},{clabe:'123'},{clabe:'',account:'',card:''},{card:'1234'},{whatsapp:'12'},{group:'https://example.com/grupo'},{group:'javascript:alert(1)'},{group:5},{holdHours:0},{holdHours:73},{holdHours:'2'}])assert.equal((await post('/api/admin/payment-settings',{...bank,...change})).status,400);
+for(const change of [{bank:''},{holder:''},{clabe:'123'},{clabe:'',account:'',card:''},{card:'1234'},{whatsapp:'12'},{holdHours:0},{holdHours:73},{holdHours:'2'}])assert.equal((await post('/api/admin/payment-settings',{...bank,...change})).status,400);
 assert.equal((await post('/api/admin/payment-settings',{...bank,clabe:'012 345 678 901 234 567'})).status,200);
-assert.equal((await (await fetch(base+'/api/payment-info')).json()).clabe,'012345678901234567');
-assert.equal((await (await fetch(base+'/api/payment-info')).json()).group,'');
-assert.equal((await post('/api/admin/payment-settings',{...bank,group:'https://chat.whatsapp.com/AbCdEf123456'})).status,200);
-assert.equal((await (await fetch(base+'/api/payment-info')).json()).group,'https://chat.whatsapp.com/AbCdEf123456');
-current=await (await fetch(base+'/api/raffle')).json();assert.equal(current.open,false);assert.match(current.message,/aún no comienza/);
+assert.equal((await (await fetch(base+'/api/payment-info')).json()).clabe,'012345678901234567');current=await (await fetch(base+'/api/raffle')).json();assert.equal(current.open,false);assert.match(current.message,/aún no comienza/);
 assert.equal((await post('/api/reservations',{name:'Early User',phone:'5512345678',numbers:[1]})).status,409);
 const second=await (await post('/api/admin/raffles',{...input,photo:null})).json();assert.equal((await post('/api/admin/raffles/status',{id:second.id,status:'active'})).status,200);
 assert.equal((await (await fetch(base+'/api/raffle')).json()).raffles.length,2);assert.equal((await post('/api/admin/raffles/status',{id:second.id,status:'draft'})).status,200);
@@ -221,6 +217,49 @@ assert.deepEqual(waha.map(x=>x.path),['/api/contacts/check-exists','/api/sendTex
 const message=waha[1].body;assert.equal(message.session,'peso');assert.equal(message.chatId,'5215512345678@c.us');assert.match(message.text,/Ana Pérez/);assert.match(message.text,/00007, 99999/);assert.match(message.text,/#mis-boletos/);assert.doesNotMatch(message.text,/folio/i);
 assert.equal(calls.length,1);assert.equal(calls[0].secret,'hook-secret');const sent=calls[0].body;assert.equal(sent.event,'payment_approved');assert.equal(Object.hasOwn(sent,'folio'),false);assert.equal(sent.whatsapp,'525512345678');assert.deepEqual(sent.numbers,['00007','99999']);assert.equal(sent.name,'Ana Pérez');assert.match(sent.lookup_url,/#mis-boletos$/);
 }finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;hook.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('the admin WhatsApp group answers menu, corte and boletos through the WAHA webhook',async()=>{
+const {createServer}=await import('node:http');const sent=[];const fake=createServer((req,res)=>{let text='';req.on('data',chunk=>text+=chunk);req.on('end',()=>{const url=new URL(req.url,'http://x');res.setHeader('Content-Type','application/json');if(url.pathname==='/api/sendText')sent.push(JSON.parse(text));res.end(url.pathname==='/api/contacts/check-exists'?JSON.stringify({numberExists:true}):'{}');});});await new Promise(r=>fake.listen(3112,'127.0.0.1',r));
+const group='120363000000000001@g.us';
+const dir=mkdtempSync(join(tmpdir(),'peso-bot-'));const base='http://localhost:3111';const proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env:{...process.env,PORT:'3111',NODE_ENV:'test',PUBLIC_ORIGIN:base,ADMIN_PASSWORD:'bot-test-password',WAHA_URL:'http://127.0.0.1:3112',WAHA_SESSION:'peso',WAHA_ADMIN_GROUP:group,WAHA_WEBHOOK_SECRET:'bot-secret'}});
+const post=(path,data,cookie='')=>fetch(base+path,{method:'POST',headers:{Origin:base,'Content-Type':'application/json',Cookie:cookie},body:JSON.stringify(data)});
+// WAHA posts without a browser Origin.
+const hook=(body,id,{from=group,secret='bot-secret'}={})=>fetch(base+'/api/waha/webhook',{method:'POST',headers:{'Content-Type':'application/json','X-Peso-Secret':secret},body:JSON.stringify({event:'message',session:'peso',payload:{id,from,fromMe:false,body}})});
+const toGroup=()=>sent.filter(x=>x.chatId===group);
+async function replies(count){for(let i=0;i<50&&toGroup().length<count;i++)await new Promise(r=>setTimeout(r,100));return toGroup();}
+try{await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});
+const cookie=await adminCookie(base,'bot-test-password');await openSale(base,cookie);
+assert.equal((await post('/api/reservations',{name:'Ana Pérez',phone:'5512345678',numbers:[1,2,3]})).status,201);
+assert.equal((await post('/api/reservations',{name:'Luis Gómez',phone:'5587654321',numbers:[10]})).status,201);
+assert.equal((await post('/api/reservations',{name:'Eva Ruiz',phone:'5511112222',numbers:[20,21]})).status,201);
+const paid=await (await post('/api/payments/submit',{phone:'5512345678',tracking:'BOTPAID001',receipt:{type:'image/png',base64:png}})).json();
+assert.equal((await post('/api/admin/payments/review',{id:paid.id,decision:'approved',reason:'Depósito verificado'},cookie)).status,200);
+assert.equal((await post('/api/payments/submit',{phone:'5587654321',tracking:'BOTREVIEW1',receipt:{type:'image/png',base64:png}})).status,201);
+assert.equal((await hook('corte','m0',{secret:'wrong'})).status,401);
+assert.equal((await fetch(base+'/api/waha/webhook',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,401);
+assert.equal((await hook('corte','m1',{from:'5215500000000@c.us'})).status,200);
+assert.equal((await hook('hola a todos','m2')).status,200);
+assert.equal((await hook('Corte','m3')).status,200);
+const corte=(await replies(1))[0];assert.equal(corte.session,'peso');
+assert.match(corte.text,/Corte/);assert.match(corte.text,/Vendidos: 3 · \$150\.00/);assert.match(corte.text,/En revisión: 1 · \$50\.00/);assert.match(corte.text,/Sin pagar: 2 · \$100\.00/);assert.match(corte.text,/Disponibles: 94 de 100/);assert.match(corte.text,/Comprobantes por revisar: 1/);
+assert.equal((await hook('corte','m3')).status,200);
+assert.equal((await hook('/boletos','m4')).status,200);
+const boletos=(await replies(2))[1];
+assert.match(boletos.text,/Vendidos \(3\):\* 001-003/);assert.match(boletos.text,/Luis Gómez · 5587654321: 010 · \$50\.00 · 🧾 en revisión/);assert.match(boletos.text,/Eva Ruiz · 5511112222: 020-021 · \$100\.00 · vence/);
+assert.equal((await hook('menú','m5')).status,200);
+const menu=(await replies(3))[2];assert.match(menu.text,/corte/);assert.match(menu.text,/boletos/);
+await new Promise(r=>setTimeout(r,300));
+// Only m3, m4 and m5 were answered: other chats, chatter and the repeated m3 get no reply.
+assert.equal(toGroup().length,3);
+}finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;fake.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('the WhatsApp webhook stays off until the admin group and secret are configured',async()=>{
+const dir=mkdtempSync(join(tmpdir(),'peso-bot-off-'));const base='http://localhost:3113';const proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env:{...process.env,PORT:'3113',NODE_ENV:'test',PUBLIC_ORIGIN:base,ADMIN_PASSWORD:'bot-off-password',WAHA_ADMIN_GROUP:'',WAHA_WEBHOOK_SECRET:''}});
+try{await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});
+assert.equal((await fetch(base+'/api/waha/webhook',{method:'POST',headers:{'Content-Type':'application/json','X-Peso-Secret':''},body:'{}'})).status,404);
+}finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;rmSync(dir,{recursive:true,force:true});}
 });
 
 test('admin edits, deletes and reschedules raffles against the sales goal',async()=>{
