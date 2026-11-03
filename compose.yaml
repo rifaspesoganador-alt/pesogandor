@@ -20,6 +20,8 @@ services:
       WAHA_URL: ${WAHA_URL:-http://waha:3000}
       WAHA_API_KEY: ${WAHA_API_KEY:-}
       WAHA_SESSION: ${WAHA_SESSION:-DEFAULT_2}
+      WAHA_ADMIN_GROUP: ${WAHA_ADMIN_GROUP:-}
+      WAHA_WEBHOOK_SECRET: ${WAHA_WEBHOOK_SECRET:-}
     volumes:
       - peso_data:/app/data
     networks:
