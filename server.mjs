@@ -67,7 +67,7 @@ const sha256=value=>createHash('sha256').update(value).digest();
 const validSecret=value=>typeof value==='string'&&timingSafeEqual(sha256(value),sha256(webhookSecret));
 const answered=new Map();
 const mxTime=ms=>new Date(ms).toLocaleString('es-MX',{timeZone:'America/Mexico_City',dateStyle:'medium',timeStyle:'short'});
-function botCommand(text){if(typeof text!=='string'||text.length>40)return null;const word=text.normalize('NFD').replace(/[̀-ͯ]/g,'').trim().toLowerCase().replace(/^[/!#.]+/,'');return {menu:'menu',ayuda:'menu',corte:'corte',boletos:'boletos',boleto:'boletos','1':'corte','2':'boletos'}[word]||null;}
+function botCommand(text){if(typeof text!=='string'||text.length>40)return null;const word=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase().replace(/^[/!#.]+/,'');return {menu:'menu',ayuda:'menu',corte:'corte',boletos:'boletos',boleto:'boletos','1':'corte','2':'boletos'}[word]||null;}
 // Raffles on sale, plus closed ones whose draw is still ahead.
 function reportRaffles(){return db.prepare("SELECT id,prize,price_cents,ticket_count,status,COALESCE(goal_percent,80) AS goal FROM raffles WHERE status='active' OR (status='closed' AND draw_at>=?) ORDER BY created").all(Date.now());}
 function raffleSales(raffle){
