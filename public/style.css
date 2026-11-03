@@ -190,4 +190,5 @@ h2 em,.raffle-prize em,.lucky-copy h3 em,.payment-details h3 em{color:var(--lime
 .lucky-results span.more,.checkout-tickets span.more{font:600 13px Poppins,Arial,sans-serif}
 .number-ribbon{font-style:normal;letter-spacing:2px}
 @media(max-width:700px){.raffle-countdown b{font-size:28px}.tickets button{font-size:15px}}
-.price>span,.price small,.raffle-stats strong small{font-family:Poppins,Arial,sans-serif;font-weight:600;letter-spacing:.5px}
+.price>span,.price small,.raffle-stats strong small{font-family:Poppins,Arial,sans-serif;font-weight:600;letter-spacing:.5px}.site-header nav a.nav-group[hidden]{display:none}.site-header nav a.nav-group{color:#25d366}.site-header nav a.nav-group:hover{color:#25d366;border-color:#25d366}
+:root[data-theme=light] .site-header nav a.nav-group,:root[data-theme=light] .site-header nav a.nav-group:hover{color:#0e7a3e;border-color:#0e7a3e}
