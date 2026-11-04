@@ -200,4 +200,4 @@ h2 em,.raffle-prize em,.lucky-copy h3 em,.payment-details h3 em{color:var(--lime
 .wa-float:hover{background:#0f9449;transform:translateY(-3px)}.wa-float:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
 .wa-float-label{display:none;font-weight:600;font-size:14px}body.has-selection .wa-float{bottom:104px}
 @media(min-width:1000px){.wa-float-label{display:inline}.wa-float{padding:0 20px 0 16px}}
-@media(max-width:700px){.wa-float{right:14px;bottom:14px;height:54px;min-width:54px}body.has-selection .wa-float{bottom:96px}}
+@media(max-width:700px){.wa-float{right:14px;bottom:14px;width:54px;height:54px;min-width:0;padding:0}body.has-selection .wa-float{bottom:96px}}
