@@ -47,3 +47,4 @@
 :root[data-theme=light] .admin-site .site-header nav a:hover{background:#d0590f12}:root[data-theme=light] .admin-site .site-header nav a[aria-current]{background:#d0590f14;border-color:#d0590f44}
 :root[data-theme=light] .admin-site .theme-toggle:hover{border-color:#d0590f;background:#d0590f10}
 .raffle-date-editor{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px;padding:18px;margin-top:22px;background:#130f0c}.raffle-date-editor>.records-note{grid-column:1/-1;margin:0}.raffle-date-editor input{font-size:12px;color-scheme:dark}#password-form .button{margin-top:20px}#password-message{font-size:12px;line-height:1.8;color:#ffd2b2}@media(max-width:850px){.raffle-date-editor{grid-template-columns:1fr}}
+.visit-metrics{margin-bottom:10px}.visit-note{margin:0 0 32px}
