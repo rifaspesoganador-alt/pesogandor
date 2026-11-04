@@ -12,6 +12,10 @@ Las letras del sitio (Anton para titulares y números, Poppins para el texto) es
 2. Pulsa **Nueva rifa**: premio, descripción, precio, cantidad de boletos (máximo 100,000; el sitio los muestra en páginas de 1,000 con buscador de número), fechas de inicio, cierre y sorteo (hora del centro de México) y foto opcional. Se guarda como borrador.
 3. Pulsa **Poner en venta**. Puede haber varias rifas en venta al mismo tiempo: el sitio las muestra como pestañas («Elige tu rifa») y cada una tiene sus propios boletos, numeración y precio. Los boletos se pueden apartar entre el inicio y el cierre de cada rifa. **Cerrar ventas** detiene nuevos apartados y conserva los existentes.
 
+## Contador de visitas
+
+El panel muestra las visitas a la página pública: personas distintas y visitas totales de hoy, los últimos 7 y 30 días, y el total desde que se activó; el comando `corte` del bot incluye las de hoy y 7 días. No cuenta los dispositivos donde se haya iniciado sesión en el panel (quedan marcados dos años, aunque cambie la IP o se cierre la sesión), ni bots ni vistas previas de enlaces de WhatsApp o Facebook. Cada persona cuenta una vez al día mediante una huella cifrada de IP y navegador; no se guardan IPs, y las huellas se borran a los 31 días.
+
 ## Editar, borrar y reprogramar
 
 Cada rifa tiene una meta de venta (80% de los boletos pagados por defecto, editable). En el panel, **Editar** corrige premio, descripción, precio, cantidad, meta, fechas y foto (agregar, cambiar o quitar). Si ya hay boletos apartados o vendidos, el precio queda fijo y la cantidad no puede bajar por debajo del número más alto ocupado. **Borrar** solo está disponible mientras la rifa no tenga boletos apartados ni vendidos. **Reprogramar** aparece mientras no se alcance la meta: pide un nuevo cierre y una nueva fecha de sorteo, conserva todos los boletos, vuelve a poner en venta una rifa cerrada y el sitio muestra «Fecha reprogramada».

@@ -83,7 +83,8 @@ if(!raffles.length)lines.push('','No hay rifas en venta.');
 for(const raffle of raffles){const s=raffleSales(raffle),taken=s.paid.count+s.review.count+s.unpaid.count,goal=Math.ceil(raffle.ticket_count*raffle.goal/100);total+=s.paid.cents;
 lines.push('',`*${raffle.prize}*${raffle.status==='closed'?' (ventas cerradas)':''}`,`✅ Vendidos: ${s.paid.count} · ${money(s.paid.cents)}`,`🧾 En revisión: ${s.review.count} · ${money(s.review.cents)}`,`⏳ Sin pagar: ${s.unpaid.count} · ${money(s.unpaid.cents)}`,`🎟️ Disponibles: ${raffle.ticket_count-taken} de ${raffle.ticket_count}`,`🎯 Meta ${raffle.goal}%: ${s.paid.count} de ${goal} (${Math.floor(s.paid.count*100/goal)}%)`);}
 const reviews=db.prepare("SELECT COUNT(*) AS n FROM payment_submissions WHERE status='pending'").get().n;
-lines.push('',`💰 Total cobrado: ${money(total)}`,`📥 Comprobantes por revisar: ${reviews}`);return lines.join('\n');}
+const visits=visitStats(),people=n=>`${n} ${n===1?'persona':'personas'}`;
+lines.push('',`💰 Total cobrado: ${money(total)}`,`📥 Comprobantes por revisar: ${reviews}`,`👀 Visitas hoy: ${people(visits.today.visitors)} · 7 días: ${people(visits.week.visitors)}`);return lines.join('\n');}
 function boletosTexts(){
 const raffles=reportRaffles();if(!raffles.length)return ['🎟️ No hay rifas en venta.'];
 return raffles.map(raffle=>{const s=raffleSales(raffle),width=Math.max(3,String(raffle.ticket_count-1).length),taken=s.paid.count+s.review.count+s.unpaid.count;
@@ -168,6 +169,23 @@ function cookie(value,age){return `${cookieName}=${value}; HttpOnly; SameSite=St
 function audit(event,id=null){db.prepare('INSERT INTO audit(event,reservation,created) VALUES(?,?,?)').run(event,id,Date.now());}
 // Behind Traefik (TRUST_PROXY=1) the last X-Forwarded-For entry is the one the proxy added; earlier entries come from the client.
 function clientIp(req){if(process.env.TRUST_PROXY==='1'){const chain=String(req.headers['x-forwarded-for']||'').split(',').map(x=>x.trim()).filter(Boolean);if(chain.length)return chain[chain.length-1];}return req.socket.remoteAddress||'unknown';}
+// Visit counter for the public page, shown only in the panel. Devices where the admin signed in carry an owner cookie and are never counted.
+// A visitor counts once per day through a salted hash of IP and browser: no IP is stored, and the daily hashes are kept 31 days.
+db.exec('CREATE TABLE IF NOT EXISTS visit_days(day TEXT PRIMARY KEY,views INTEGER NOT NULL DEFAULT 0,visitors INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS visitors(day TEXT NOT NULL,visitor TEXT NOT NULL,PRIMARY KEY(day,visitor));');
+const visitSalt=(()=>{const row=db.prepare("SELECT value FROM settings WHERE key='visit_salt'").get();if(row)return row.value;const salt=randomBytes(16).toString('hex');db.prepare("INSERT INTO settings VALUES('visit_salt',?)").run(salt);return salt;})();
+const OWNER_COOKIE='pg_owner',BOT_AGENT=/bot|crawl|spider|slurp|preview|facebookexternalhit|whatsapp|telegram|discord|curl|wget|python|headless|lighthouse/i;
+const mxDay=(ms=Date.now())=>new Date(ms).toLocaleDateString('en-CA',{timeZone:'America/Mexico_City'});
+function ownerDevice(req){if((req.headers.cookie||'').split(';').some(x=>x.trim()===`${OWNER_COOKIE}=1`))return true;const s=sessions.get(token(req));return !!s&&s.expires>Date.now();}
+function countVisit(req){
+const agent=String(req.headers['user-agent']||'');if(!agent||BOT_AGENT.test(agent)||ownerDevice(req)||/prefetch|prerender/i.test(String(req.headers['sec-purpose']||req.headers.purpose||'')))return;
+const day=mxDay(),visitor=createHash('sha256').update(`${visitSalt}|${clientIp(req)}|${agent}`).digest('base64url').slice(0,22);
+const fresh=db.prepare('INSERT OR IGNORE INTO visitors VALUES(?,?)').run(day,visitor).changes;
+db.prepare('INSERT INTO visit_days(day,views,visitors) VALUES(?,1,?) ON CONFLICT(day) DO UPDATE SET views=views+1,visitors=visitors+excluded.visitors').run(day,fresh);}
+function visitStats(){
+const since=days=>mxDay(Date.now()-(days-1)*86400000),views=from=>db.prepare('SELECT COALESCE(SUM(views),0) AS n FROM visit_days WHERE day>=?').get(from).n,people=from=>db.prepare('SELECT COUNT(DISTINCT visitor) AS n FROM visitors WHERE day>=?').get(from).n;
+const range=from=>({views:views(from),visitors:people(from)});
+return {today:range(since(1)),week:range(since(7)),month:range(since(30)),total:{views:views('0000-00-00')}};}
+setInterval(()=>db.prepare('DELETE FROM visitors WHERE day<?').run(mxDay(Date.now()-31*86400000)),3600000).unref();
 // Each public action has a generous site-wide ceiling plus a per-visitor limit, so one person cannot block everyone else.
 function limits(req,key,globalMax,perIpMax){limit(key,globalMax,60000);limit(`${key}:${clientIp(req)}`,perIpMax,60000);}
 function limit(key,max,window){const now=Date.now();db.prepare('DELETE FROM limits WHERE until<=?').run(now);db.prepare('INSERT INTO limits VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1').run(key,now+window);const a=db.prepare('SELECT count,until FROM limits WHERE key=?').get(key);if(a.count>max)throw Object.assign(problem(429,'Demasiadas solicitudes. Intenta más tarde.'),{retry:Math.ceil((a.until-now)/1000)});}
@@ -267,12 +285,15 @@ const b=await body(req);if(!credentials.verify(b.password))return send(res,401,{
 // Rotate only the session used by this browser; keep other devices signed in.
 sessions.delete(token(req));for(const [key,s] of sessions)if(s.expires<=now||s.last+900000<=now)sessions.delete(key);
 if(sessions.size>=20)return send(res,429,{error:'Se alcanzó el límite de sesiones. Cierra alguna o espera a que expire.'});
-const sessionToken=randomBytes(32).toString('hex');sessions.set(sessionToken,{expires:now+3600000,last:now});audit('login');res.setHeader('Set-Cookie',cookie(sessionToken,3600));return send(res,200,{ok:true});
+const sessionToken=randomBytes(32).toString('hex');sessions.set(sessionToken,{expires:now+3600000,last:now});audit('login');
+// The owner cookie outlives the session and logout, so this device stays out of the visit counter for two years.
+res.setHeader('Set-Cookie',[cookie(sessionToken,3600),`${OWNER_COOKIE}=1; HttpOnly; SameSite=Lax; Path=/; Max-Age=63072000${production||origin.startsWith('https:')?'; Secure':''}`]);return send(res,200,{ok:true});
 }
 if(path.startsWith('/api/admin/')){
 if(!admin(req))return send(res,401,{error:'Inicia sesión'});
 if(path==='/api/admin/password'&&req.method==='POST'){limit('change_password',5,900000);const b=await body(req);if(!credentials.verify(b.currentPassword))return send(res,401,{error:'La contraseña actual no coincide.'});if(typeof b.newPassword!=='string'||b.newPassword.length<5||b.newPassword.length>200)return send(res,400,{error:'La contraseña debe tener entre 5 y 200 caracteres.'});credentials.save(b.newPassword);const current=token(req);for(const key of sessions.keys())if(key!==current)sessions.delete(key);audit('password_changed');return send(res,200,{ok:true});}
 if(path==='/api/admin/payment-settings'&&req.method==='GET')return send(res,200,paymentInfo());
+if(path==='/api/admin/visits'&&req.method==='GET')return send(res,200,visitStats());
 if(path==='/api/admin/payment-settings'&&req.method==='POST'){const info=paymentSettings(await body(req));db.prepare("INSERT INTO settings VALUES('payment',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(info));audit('payment_settings_changed');return send(res,200,info);}
 if(path==='/api/admin/raffles/dates'&&req.method==='POST'){const b=await body(req);if(typeof b.id!=='string'||!/^[a-f0-9]{24}$/.test(b.id))return send(res,400,{error:'Rifa inválida'});const dates=raffleDates(b);const result=db.prepare('UPDATE raffles SET starts_at=?,ends_at=?,draw_at=? WHERE id=?').run(...dates,b.id);if(!result.changes)return send(res,404,{error:'Rifa no disponible'});audit('raffle_dates_changed',b.id);return send(res,200,{ok:true});}
 if(path==='/api/admin/raffles/status'&&req.method==='POST'){
@@ -337,6 +358,7 @@ if(path==='/api/admin/confirm'&&req.method==='POST')return send(res,410,{error:'
 const files={'/':'index.html','/CFAD':'admin.html','/CFAD/':'admin.html','/app.js':'app.js','/theme.js':'theme.js','/admin.js':'admin.js','/style.css':'style.css','/admin.css':'admin.css','/logo.png':'logo.png','/logo-small.png':'logo-small.png','/favicon.ico':'favicon.ico','/favicon-32.png':'favicon-32.png','/favicon-192.png':'favicon-192.png','/apple-touch-icon.png':'apple-touch-icon.png',
 // Self-hosted fonts (Anton for titles and numbers, Poppins for text): no third-party requests and the CSP stays 'self'.
 '/fonts/anton-400.woff2':'fonts/anton-400.woff2','/fonts/poppins-400.woff2':'fonts/poppins-400.woff2','/fonts/poppins-600.woff2':'fonts/poppins-600.woff2','/fonts/poppins-700.woff2':'fonts/poppins-700.woff2'};
+if(req.method==='GET'&&path==='/'){try{countVisit(req);}catch(error){console.error('visit_count_failed',error.message);}}
 if(['GET','HEAD'].includes(req.method)&&Object.hasOwn(files,path)){const {body:file,etag}=staticFile(files[path]),image=/\.(png|ico|woff2)$/.test(path);return sendCached(req,res,file,etag,path.endsWith('.png')?'image/png':path.endsWith('.ico')?'image/x-icon':path.endsWith('.woff2')?'font/woff2':path.endsWith('.js')?'text/javascript; charset=utf-8':path.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8',image?604800:0);}
 send(res,404,{error:'No encontrado'});
 }catch(error){if(error.retry)res.setHeader('Retry-After',String(error.retry));if(!error.status)console.error('request_failed');send(res,error.status||500,{error:error.status?error.message:'Error interno'});}
