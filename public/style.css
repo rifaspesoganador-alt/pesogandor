@@ -191,3 +191,13 @@ h2 em,.raffle-prize em,.lucky-copy h3 em,.payment-details h3 em{color:var(--lime
 .number-ribbon{font-style:normal;letter-spacing:2px}
 @media(max-width:700px){.raffle-countdown b{font-size:28px}.tickets button{font-size:15px}}
 .price>span,.price small,.raffle-stats strong small{font-family:Poppins,Arial,sans-serif;font-weight:600;letter-spacing:.5px}
+/* Social links in the side menu and the floating WhatsApp channel button (moves up while the selection bar is showing). */
+.menu-social{display:flex;flex-direction:column;gap:6px;margin-top:auto}.menu-social+.theme-toggle{margin-top:0}
+.menu-social-title{margin:0 0 2px;padding:0 12px;font-size:10px;letter-spacing:2px;color:var(--muted)}
+.social-link{display:flex;align-items:center;gap:12px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-size:13px;color:var(--ink);text-decoration:none;transition:background .2s,border-color .2s,color .2s}
+.social-link svg{flex:none}.social-link>span{margin-left:auto;opacity:.6}.social-link:hover{border-color:var(--lime);color:var(--lime)}
+.wa-float{position:fixed;right:20px;bottom:20px;z-index:18;display:flex;align-items:center;justify-content:center;gap:10px;height:58px;min-width:58px;padding:0 14px;border-radius:29px;background:#0c7d3e;color:#fff;text-decoration:none;box-shadow:0 12px 30px #0006;transition:transform .2s,background .2s,bottom .35s cubic-bezier(.2,.8,.2,1)}
+.wa-float:hover{background:#0f9449;transform:translateY(-3px)}.wa-float:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+.wa-float-label{display:none;font-weight:600;font-size:14px}body.has-selection .wa-float{bottom:104px}
+@media(min-width:1000px){.wa-float-label{display:inline}.wa-float{padding:0 20px 0 16px}}
+@media(max-width:700px){.wa-float{right:14px;bottom:14px;height:54px;min-width:54px}body.has-selection .wa-float{bottom:96px}}
