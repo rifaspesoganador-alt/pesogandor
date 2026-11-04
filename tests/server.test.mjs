@@ -255,6 +255,22 @@ assert.equal(toGroup().length,3);
 }finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;fake.close();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('the visit counter counts people once a day and skips previews and the owner devices',async()=>{
+const dir=mkdtempSync(join(tmpdir(),'peso-visits-'));const base='http://localhost:3114';const proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env:{...process.env,PORT:'3114',NODE_ENV:'test',PUBLIC_ORIGIN:base,ADMIN_PASSWORD:'visits-test-password'}});
+const visit=(agent,cookie='')=>fetch(base+'/',{headers:{'User-Agent':agent,Cookie:cookie}}).then(r=>{assert.equal(r.status,200);return r.text();});
+try{await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});
+assert.equal((await fetch(base+'/api/admin/visits')).status,401);
+await visit('Mozilla/5.0 Persona A');await visit('Mozilla/5.0 Persona A');await visit('Mozilla/5.0 Persona B');
+await visit('WhatsApp/2.24.1 A');await visit('facebookexternalhit/1.1');
+const login=await fetch(base+'/api/login',{method:'POST',headers:{Origin:base,'Content-Type':'application/json'},body:JSON.stringify({password:'visits-test-password'})});assert.equal(login.status,200);
+const cookies=login.headers.getSetCookie(),session=cookies[0].split(';')[0],owner=cookies.find(c=>c.startsWith('pg_owner='));
+assert.ok(owner);assert.match(owner,/HttpOnly/);assert.match(owner,/SameSite=Lax/);assert.match(owner,/Max-Age=63072000/);
+await visit('Mozilla/5.0 Owner',owner.split(';')[0]);await visit('Mozilla/5.0 Owner session',session);
+const stats=await (await fetch(base+'/api/admin/visits',{headers:{Cookie:session}})).json();
+assert.deepEqual(stats.today,{views:3,visitors:2});assert.deepEqual(stats.week,{views:3,visitors:2});assert.deepEqual(stats.month,{views:3,visitors:2});assert.equal(stats.total.views,3);
+}finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;rmSync(dir,{recursive:true,force:true});}
+});
+
 test('the WhatsApp webhook stays off until the admin group and secret are configured',async()=>{
 const dir=mkdtempSync(join(tmpdir(),'peso-bot-off-'));const base='http://localhost:3113';const proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env:{...process.env,PORT:'3113',NODE_ENV:'test',PUBLIC_ORIGIN:base,ADMIN_PASSWORD:'bot-off-password',WAHA_ADMIN_GROUP:'',WAHA_WEBHOOK_SECRET:''}});
 try{await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});
