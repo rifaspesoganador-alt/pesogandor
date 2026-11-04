@@ -69,6 +69,13 @@ Al arrancar, la base se actualiza sola: las rifas que estaban «visibles en demo
 docker compose exec -T web node borrar-datos-demo.mjs
 ```
 
+Para borrar por completo una rifa de pruebas que ya tiene apartados (el panel solo permite borrar rifas sin boletos), ciérrala en el panel y, con su id, primero revisa qué se borraría y luego confírmalo. No se puede deshacer y nunca borra una rifa en venta:
+
+```bash
+docker compose exec -T web node borrar-rifa.mjs <id>
+docker compose exec -T web node borrar-rifa.mjs <id> --confirmar
+```
+
 ## Contraseña perdida
 
 En `/docker/peso-ganador`, sin dejar la clave en el historial:
