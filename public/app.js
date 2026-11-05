@@ -16,7 +16,7 @@ themeToggle.onclick=()=>{const next=document.documentElement.dataset.theme==='li
 const money=cents=>new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(cents/100);
 const mxTime=value=>new Date(value).toLocaleString('es-MX',{timeZone:'America/Mexico_City',dateStyle:'medium',timeStyle:'short'});
 const PAGE_SIZE=1000,pageSelect=document.querySelector('#ticket-page'),ticketSearch=document.querySelector('#ticket-search');
-let raffles=[],raffleId=null,raffle=null,digits=3,takenBits=new Uint8Array(0),page=0,holdHours=24,saleOpen=false,paymentInfo=null;const selectionBar=document.querySelector('#selection-bar');const pad=n=>String(n).padStart(digits,'0');
+let raffles=[],raffleId=null,raffle=null,digits=3,takenBits=new Uint8Array(0),page=0,holdHours=5,saleOpen=false,paymentInfo=null;const selectionBar=document.querySelector('#selection-bar');const pad=n=>String(n).padStart(digits,'0');
 const isTaken=n=>(takenBits[n>>3]>>(n&7))&1;
 function holdText(){return holdHours===1?'1 hora':`${holdHours} horas`;}
 function conceptWarning(){return `En el concepto de tu pago escribe tu nombre o tu número de celular. Si no lo haces, no podremos acreditar tu pago y tus boletos serán liberados después de ${holdText()}.`;}
