@@ -156,3 +156,50 @@
 :root[data-theme=light] .contact-metrics span{color:#8a5a3a}:root[data-theme=light] .broadcast-message{color:#b44a08}
 :root[data-theme=light] .broadcast-form textarea{background:#fff;color:var(--ink);border-color:#b06a3a44}
 :root[data-theme=light] .nav-badge{background:#d0590f;color:#fff}
+/* Tarjetas de rifas con la foto arriba (mismo estilo que Métricas) y la pestaña de Ajustes. */
+.raffle-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px;align-items:start}
+.raffle-grid .raffle-card{display:flex;flex-direction:column;align-items:stretch;gap:0;padding:0;border:1px solid #bd9c7e30;border-radius:22px;background:#130f0c;overflow:visible;transition:border-color .2s}
+.raffle-grid .raffle-card:hover{border-color:#ff873d55}
+.raffle-grid .raffle-card.editing{grid-column:1/-1}
+.raffle-media{position:relative;width:100%;height:170px;border-radius:21px 21px 0 0;overflow:hidden;background:radial-gradient(ellipse at 30% 20%,#ff873d33,transparent 65%),#1d1611;display:grid;place-items:center}
+.raffle-grid .raffle-card .raffle-media img{width:100%;height:100%;object-fit:cover;border:0;border-radius:0}
+.raffle-media-icon{display:grid;place-items:center;width:64px;height:64px;border-radius:20px;background:linear-gradient(150deg,#ff9a52,#e2661c);color:#211006}
+.raffle-media-icon svg{width:32px;height:32px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linejoin:round}
+.raffle-media .raffle-badges{position:absolute;left:12px;top:12px;right:12px}.raffle-media .status-badge{white-space:nowrap}
+.raffle-media .status-badge{background:#130f0cd9;backdrop-filter:blur(6px)}
+.raffle-media .raffle-status-active{color:#bbd9bd;border-color:#a1c79855}
+.raffle-grid .raffle-card-copy{padding:18px 20px 20px}
+.admin-site .raffle-grid .raffle-card h3{margin:0 0 4px;font-size:18px;line-height:1.3;color:#fff0e5}
+.raffle-card-sub{margin:0;font-size:12px;color:#ad9786}
+.raffle-grid .ov-progress{margin-top:16px}
+.raffle-grid .raffle-card.reached .ov-bar i{background:linear-gradient(90deg,#7fd08f,#c5f85b)}
+.raffle-card-meta{margin:12px 0 0;font-size:11px;line-height:1.6;color:#d8b79b}
+.raffle-card-dates{margin:4px 0 0;font-size:10px;line-height:1.6;color:#a38f7f}
+.raffle-card-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px}
+.raffle-more{position:relative;margin-left:auto}
+.admin-site .raffle-more-toggle{min-width:42px;justify-content:center;font-size:16px;letter-spacing:1px;padding-inline:10px}
+.raffle-more-menu{position:absolute;right:0;bottom:calc(100% + 8px);z-index:5;min-width:190px;padding:6px;border:1px solid #c4875955;border-radius:14px;background:#1d1611;box-shadow:0 18px 40px #000a}
+.raffle-more-menu[hidden]{display:none}
+.raffle-more-item{display:block;width:100%;padding:10px 12px;border:0;border-radius:9px;background:none;color:var(--ink);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.raffle-more-item:hover{background:#ff873d14}.raffle-more-item.danger{color:#ff9c9c}.raffle-more-item.danger:hover{background:#ff6b6b14}
+.raffle-more-empty{margin:0;padding:8px 10px;font-size:11px;line-height:1.6;color:var(--muted)}
+.raffle-grid .raffle-panel:empty{display:none}
+.raffle-new-tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:300px;border:1.5px dashed #bd9c7e55;border-radius:22px;background:transparent;color:#d8b79b;font:inherit;font-size:14px;cursor:pointer;transition:border-color .2s,color .2s}
+.raffle-new-tile:hover{border-color:#ff873d;color:#ffb580}
+.raffle-new-plus{display:grid;place-items:center;width:52px;height:52px;border-radius:50%;border:1.5px solid currentColor;font-size:26px;line-height:1}
+.settings-head{margin-bottom:22px}.settings-head h2{margin:12px 0 18px}
+.settings-tabs{display:inline-flex;gap:4px;padding:4px;border:1px solid #bd9c7e35;border-radius:14px;background:#130f0c}
+.settings-tabs button{padding:10px 18px;border:0;border-radius:10px;background:none;color:#d8b79b;font:inherit;font-size:13px;cursor:pointer}
+.settings-tabs button[aria-selected=true]{background:#ff873d;color:#211006;font-weight:600}
+.settings-panel[hidden]{display:none}
+@media(max-width:650px){.raffle-grid{grid-template-columns:1fr}.raffle-grid .raffle-card{flex-direction:column}.raffle-grid .raffle-card .raffle-media img{width:100%;height:100%}.raffle-media{height:150px}.raffle-new-tile{min-height:120px;flex-direction:row}.settings-tabs{display:flex}.settings-tabs button{flex:1}}
+:root[data-theme=light] .raffle-grid .raffle-card{background:#fff;border-color:#b06a3a33;box-shadow:0 14px 40px #5a3a2012}
+:root[data-theme=light] .raffle-media{background:radial-gradient(ellipse at 30% 20%,#ffb27a55,transparent 65%),#fdf1e7}
+:root[data-theme=light] .raffle-media .status-badge{background:#ffffffe0}
+:root[data-theme=light] .admin-site .raffle-grid .raffle-card h3{color:var(--ink)}
+:root[data-theme=light] .raffle-card-sub,:root[data-theme=light] .raffle-card-dates{color:var(--muted)}:root[data-theme=light] .raffle-card-meta{color:#8a5a3a}
+:root[data-theme=light] .raffle-more-menu{background:#fff;border-color:#b06a3a44;box-shadow:0 18px 40px #5a3a2026}
+:root[data-theme=light] .raffle-more-item:hover{background:#d0590f10}:root[data-theme=light] .raffle-more-item.danger{color:#c0392b}
+:root[data-theme=light] .raffle-new-tile{border-color:#b06a3a55;color:#8a5a3a}:root[data-theme=light] .raffle-new-tile:hover{border-color:#d0590f;color:#d0590f}
+:root[data-theme=light] .settings-tabs{background:#fdf7f1;border-color:#b06a3a33}:root[data-theme=light] .settings-tabs button{color:#8a5a3a}
+:root[data-theme=light] .settings-tabs button[aria-selected=true]{background:#d0590f;color:#fff}
