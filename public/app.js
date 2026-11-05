@@ -122,7 +122,22 @@ luckyMessage.textContent=selected.size!==data.numbers.length?'Algunos boletos se
 catch{luckyResults.replaceChildren();luckyMessage.textContent='No se pudo consultar la disponibilidad. Intenta de nuevo.';}finally{clearInterval(spin);choosingRandom=false;button.disabled=false;reserveButton.disabled=false;luckyForm.classList.remove('is-spinning');}};
 const paymentForm=document.querySelector('#payment-form'),paymentMessage=document.querySelector('#payment-message');
 // The raffle is sent when known; a phone with pending tickets in several raffles otherwise gets a list to choose from.
-async function submitReceipt(phone,tracking,file,raffleChoice){if(!file||!['image/jpeg','image/png','application/pdf'].includes(file.type)||file.size>5242880)throw Error('Adjunta tu comprobante en JPG, PNG o PDF, de máximo 5 MB.');const base64=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(Error('No se pudo leer el archivo.'));reader.readAsDataURL(file);});let r;try{r=await fetch('/api/payments/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,tracking,raffle:raffleChoice||undefined,receipt:{type:file.type,base64}})});}catch{throw Error('No se pudo comprobar el envío. Revisa «Mis boletos» antes de reintentar.');}const data=await r.json();if(!r.ok)throw Object.assign(Error(data.error),{choices:data.choices});return data.message;}
+const fileBase64=file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(Error('No se pudo leer el archivo.'));reader.readAsDataURL(file);});
+// Photos are re-encoded to a light JPEG (at most 2400 px) before upload. That also takes HEIC or WEBP wherever the
+// browser can open them, phone photos over 5 MB and JPEGs with extra data appended. PDFs are sent as they are.
+async function prepareReceipt(file){
+if(!file)throw Error('Adjunta tu comprobante: foto, captura de pantalla o PDF.');
+if(file.type==='application/pdf'||/\.pdf$/i.test(file.name)){if(file.size>5242880)throw Error('El PDF debe pesar máximo 5 MB. Si es más grande, envía una captura de pantalla del comprobante.');return {type:'application/pdf',base64:await fileBase64(file)};}
+if(!file.type.startsWith('image/')&&!/\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(file.name))throw Error('Adjunta tu comprobante como foto, captura de pantalla o PDF.');
+if(file.size>26214400)throw Error('La imagen pesa demasiado (máximo 25 MB). Envía una captura de pantalla del comprobante.');
+let bitmap=null;try{bitmap=await createImageBitmap(file,{imageOrientation:'from-image'});}catch{ /* Formats the browser cannot open fall back to the original file below. */ }
+if(!bitmap){if(['image/jpeg','image/png'].includes(file.type)&&file.size<=5242880)return {type:file.type,base64:await fileBase64(file)};throw Error('No pudimos abrir esa imagen. Toma una captura de pantalla del comprobante y súbela, o envíalo en PDF.');}
+const scale=Math.min(1,2400/Math.max(bitmap.width,bitmap.height)),canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+// White background so transparent PNG screenshots stay readable as JPEG.
+const context=canvas.getContext('2d');context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close?.();
+const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',0.85));if(!blob)throw Error('No pudimos preparar la imagen. Intenta con una captura de pantalla o un PDF.');
+return {type:'image/jpeg',base64:await fileBase64(blob)};}
+async function submitReceipt(phone,tracking,file,raffleChoice){const receipt=await prepareReceipt(file);let r;try{r=await fetch('/api/payments/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,tracking,raffle:raffleChoice||undefined,receipt})});}catch{throw Error('No se pudo comprobar el envío. Revisa «Mis boletos» antes de reintentar.');}const data=await r.json();if(!r.ok)throw Object.assign(Error(data.error),{choices:data.choices});return data.message;}
 const paymentRaffle=document.querySelector('#payment-raffle'),paymentRaffleLabel=document.querySelector('#payment-raffle-label');
 function resetPaymentRaffle(){paymentRaffleLabel.hidden=true;paymentRaffle.required=false;paymentRaffle.replaceChildren();}
 paymentForm.elements.phone.addEventListener('input',resetPaymentRaffle);
