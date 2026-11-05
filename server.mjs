@@ -123,18 +123,28 @@ const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(s
 let value;try{value=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw problem(400,'JSON inválido');}
 if(!value||typeof value!=='object'||Array.isArray(value))throw problem(400,'Se requiere un objeto JSON');return value;
 }
+// JPEG start-of-frame markers (baseline, progressive, lossless and arithmetic variants) that carry the image size.
+const JPEG_FRAMES=new Set([192,193,194,195,197,198,199,201,202,203,205,206,207]);
 function rafflePhoto(photo,{maxBytes=1048576,maxSide=4096,label='foto'}={}){
 if(photo==null)return {bytes:null,type:null};
 const sizeError=`Usa una ${label} JPG o PNG de máximo ${maxBytes/1048576} MB.`;
 if(!photo||typeof photo!=='object'||!['image/png','image/jpeg'].includes(photo.type)||typeof photo.base64!=='string'||photo.base64.length>Math.ceil(maxBytes/3)*4||!/^[A-Za-z0-9+/]*={0,2}$/.test(photo.base64))throw problem(400,sizeError);
-const bytes=Buffer.from(photo.base64,'base64');let width=0,height=0;
+let bytes=Buffer.from(photo.base64,'base64'),width=0,height=0;
 if(bytes.length<45||bytes.length>maxBytes||bytes.toString('base64')!==photo.base64)throw problem(400,sizeError);
 if(photo.type==='image/png'){
 if(bytes.subarray(0,8).toString('hex')!=='89504e470d0a1a0a'||bytes.toString('ascii',12,16)!=='IHDR'||bytes.readUInt32BE(8)!==13||bytes.toString('ascii',bytes.length-8,bytes.length-4)!=='IEND')throw problem(400,`La ${label} PNG no es válida.`);
 width=bytes.readUInt32BE(16);height=bytes.readUInt32BE(20);
 }else{
-if(bytes[0]!==255||bytes[1]!==216||bytes[bytes.length-2]!==255||bytes[bytes.length-1]!==217)throw problem(400,`La ${label} JPG no es válida.`);
-let offset=2;while(offset+4<bytes.length){if(bytes[offset]!==255)break;while(bytes[offset]===255)offset++;const marker=bytes[offset++];if(marker===218||marker===217)break;if(marker===1||marker>=208&&marker<=215)continue;const size=bytes.readUInt16BE(offset);if(size<2||offset+size>bytes.length)break;if([192,193,194].includes(marker)&&size>=8){height=bytes.readUInt16BE(offset+3);width=bytes.readUInt16BE(offset+5);break;}offset+=size;}
+if(bytes[0]!==255||bytes[1]!==216)throw problem(400,`La ${label} JPG no es válida.`);
+// Phones often append data after the image (motion photos, maker trailers). The image ends at the first end marker
+// after the scan data; whatever follows is dropped instead of rejecting the photo.
+let offset=2,end=-1;
+while(offset+4<bytes.length){if(bytes[offset]!==255)break;while(bytes[offset]===255)offset++;const marker=bytes[offset++];if(marker===217)break;if(marker===1||marker>=208&&marker<=215)continue;const size=bytes.readUInt16BE(offset);if(size<2||offset+size>bytes.length)break;
+if(JPEG_FRAMES.has(marker)&&size>=8&&!width){height=bytes.readUInt16BE(offset+3);width=bytes.readUInt16BE(offset+5);}
+if(marker===218){for(let i=offset+size;i+1<bytes.length;i++)if(bytes[i]===255&&bytes[i+1]===217){end=i+2;break;}break;}
+offset+=size;}
+if(end<0)throw problem(400,`La ${label} JPG no es válida.`);
+if(end<bytes.length)bytes=Buffer.from(bytes.subarray(0,end));
 }
 if(!width||!height||width>maxSide||height>maxSide)throw problem(400,`La ${label} debe medir como máximo ${maxSide} × ${maxSide} píxeles.`);
 return {bytes,type:photo.type};
