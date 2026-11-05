@@ -255,6 +255,22 @@ assert.equal(toGroup().length,3);
 }finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;fake.close();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('JPEG receipts with data appended after the image are accepted and trimmed',async()=>{
+// Smallest well-formed JPEG layout: SOI, APP0 (JFIF), SOF0 for 1×1 px, SOS, one scan byte pair and EOI.
+const jpeg=Buffer.from('ffd8'+'ffe000104a46494600010100000100010000'+'ffc0000b080001000101011100'+'ffda000801010000003f00'+'0000'+'ffd9','hex');
+const trailer=Buffer.from('MotionPhoto_Data ffd9 trailing bytes from the phone camera');
+const dir=mkdtempSync(join(tmpdir(),'peso-jpeg-'));const base='http://localhost:3115';const proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env:{...process.env,PORT:'3115',NODE_ENV:'test',PUBLIC_ORIGIN:base,ADMIN_PASSWORD:'jpeg-test-password'}});
+const post=(path,data,cookie='')=>fetch(base+path,{method:'POST',headers:{Origin:base,'Content-Type':'application/json',Cookie:cookie},body:JSON.stringify(data)});
+try{await new Promise((resolve,reject)=>{proc.stdout.once('data',resolve);proc.once('error',reject);proc.once('exit',()=>reject(Error('Server exited')));});
+const cookie=await adminCookie(base,'jpeg-test-password');await openSale(base,cookie);
+assert.equal((await post('/api/reservations',{name:'Rosa Díaz',phone:'5522223333',numbers:[4]})).status,201);
+// Without the end marker the file is still rejected.
+assert.equal((await post('/api/payments/submit',{phone:'5522223333',tracking:'JPEGBROKEN1',receipt:{type:'image/jpeg',base64:jpeg.subarray(0,jpeg.length-2).toString('base64')}})).status,400);
+const sent=await post('/api/payments/submit',{phone:'5522223333',tracking:'JPEGTRAIL01',receipt:{type:'image/jpeg',base64:Buffer.concat([jpeg,trailer]).toString('base64')}});assert.equal(sent.status,201);const {id}=await sent.json();
+const stored=Buffer.from(await (await fetch(`${base}/api/admin/payments/${id}/receipt`,{headers:{Cookie:cookie}})).arrayBuffer());assert.deepEqual(stored,jpeg);
+}finally{const done=new Promise(r=>proc.once('exit',r));proc.kill();await done;rmSync(dir,{recursive:true,force:true});}
+});
+
 test('the visit counter counts people once a day and skips previews and the owner devices',async()=>{
 const dir=mkdtempSync(join(tmpdir(),'peso-visits-'));const base='http://localhost:3114';const proc=spawn(process.execPath,[resolve('server.mjs')],{cwd:dir,env:{...process.env,PORT:'3114',NODE_ENV:'test',PUBLIC_ORIGIN:base,ADMIN_PASSWORD:'visits-test-password'}});
 const visit=(agent,cookie='')=>fetch(base+'/',{headers:{'User-Agent':agent,Cookie:cookie}}).then(r=>{assert.equal(r.status,200);return r.text();});
