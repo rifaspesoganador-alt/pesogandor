@@ -69,7 +69,7 @@ const answered=new Map();
 const mxTime=ms=>new Date(ms).toLocaleString('es-MX',{timeZone:'America/Mexico_City',dateStyle:'medium',timeStyle:'short'});
 function botCommand(text){if(typeof text!=='string'||text.length>40)return null;const word=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase().replace(/^[/!#.]+/,'');return {menu:'menu',ayuda:'menu',corte:'corte',boletos:'boletos',boleto:'boletos','1':'corte','2':'boletos'}[word]||null;}
 // Raffles on sale, plus closed ones whose draw is still ahead.
-function reportRaffles(){return db.prepare("SELECT id,prize,price_cents,ticket_count,status,COALESCE(goal_percent,80) AS goal FROM raffles WHERE status='active' OR (status='closed' AND draw_at>=?) ORDER BY created").all(Date.now());}
+function reportRaffles(){return db.prepare("SELECT id,prize,price_cents,ticket_count,status,ends_at,draw_at,COALESCE(goal_percent,80) AS goal FROM raffles WHERE status='active' OR (status='closed' AND draw_at>=?) ORDER BY created").all(Date.now());}
 function raffleSales(raffle){
 const rows=db.prepare("SELECT r.name,r.phone,r.numbers,r.status,r.amount_cents,r.expires,EXISTS(SELECT 1 FROM payment_submissions p WHERE p.reservation=r.id AND p.status='pending') AS review FROM reservations r WHERE r.raffle=? AND r.status IN ('paid','pending') ORDER BY r.created").all(raffle.id);
 const groups={paid:{count:0,cents:0,numbers:[]},review:{count:0,cents:0},unpaid:{count:0,cents:0},pending:[]};
@@ -194,7 +194,15 @@ db.prepare('INSERT INTO visit_days(day,views,visitors) VALUES(?,1,?) ON CONFLICT
 function visitStats(){
 const since=days=>mxDay(Date.now()-(days-1)*86400000),views=from=>db.prepare('SELECT COALESCE(SUM(views),0) AS n FROM visit_days WHERE day>=?').get(from).n,people=from=>db.prepare('SELECT COUNT(DISTINCT visitor) AS n FROM visitors WHERE day>=?').get(from).n;
 const range=from=>({views:views(from),visitors:people(from)});
-return {today:range(since(1)),week:range(since(7)),month:range(since(30)),total:{views:views('0000-00-00')}};}
+// Last 14 days for the panel chart, oldest first; days without visits come back as zero.
+const stored=new Map(db.prepare('SELECT day,views,visitors FROM visit_days WHERE day>=?').all(since(14)).map(row=>[row.day,row])),days=[];
+for(let i=13;i>=0;i--){const day=mxDay(Date.now()-i*86400000),row=stored.get(day);days.push({day,views:row?.views||0,visitors:row?.visitors||0});}
+return {today:range(since(1)),week:range(since(7)),month:range(since(30)),total:{views:views('0000-00-00')},days};}
+// Money and tickets of the raffles on sale (or closed with the draw still ahead), for the panel overview.
+function salesSummary(){const totals={paid:0,review:0,unpaid:0};
+const raffles=reportRaffles().map(raffle=>{const s=raffleSales(raffle);totals.paid+=s.paid.cents;totals.review+=s.review.cents;totals.unpaid+=s.unpaid.cents;
+return {id:raffle.id,prize:raffle.prize,status:raffle.status,ticket_count:raffle.ticket_count,goal:raffle.goal,ends_at:raffle.ends_at,draw_at:raffle.draw_at,paid:s.paid.count,review:s.review.count,unpaid:s.unpaid.count,paid_cents:s.paid.cents};});
+return {totals,raffles,reviews:db.prepare("SELECT COUNT(*) AS n FROM payment_submissions WHERE status='pending'").get().n};}
 setInterval(()=>db.prepare('DELETE FROM visitors WHERE day<?').run(mxDay(Date.now()-31*86400000)),3600000).unref();
 // Each public action has a generous site-wide ceiling plus a per-visitor limit, so one person cannot block everyone else.
 function limits(req,key,globalMax,perIpMax){limit(key,globalMax,60000);limit(`${key}:${clientIp(req)}`,perIpMax,60000);}
@@ -304,6 +312,7 @@ if(!admin(req))return send(res,401,{error:'Inicia sesión'});
 if(path==='/api/admin/password'&&req.method==='POST'){limit('change_password',5,900000);const b=await body(req);if(!credentials.verify(b.currentPassword))return send(res,401,{error:'La contraseña actual no coincide.'});if(typeof b.newPassword!=='string'||b.newPassword.length<5||b.newPassword.length>200)return send(res,400,{error:'La contraseña debe tener entre 5 y 200 caracteres.'});credentials.save(b.newPassword);const current=token(req);for(const key of sessions.keys())if(key!==current)sessions.delete(key);audit('password_changed');return send(res,200,{ok:true});}
 if(path==='/api/admin/payment-settings'&&req.method==='GET')return send(res,200,paymentInfo());
 if(path==='/api/admin/visits'&&req.method==='GET')return send(res,200,visitStats());
+if(path==='/api/admin/summary'&&req.method==='GET'){expire();return send(res,200,salesSummary());}
 if(path==='/api/admin/payment-settings'&&req.method==='POST'){const info=paymentSettings(await body(req));db.prepare("INSERT INTO settings VALUES('payment',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(info));audit('payment_settings_changed');return send(res,200,info);}
 if(path==='/api/admin/raffles/dates'&&req.method==='POST'){const b=await body(req);if(typeof b.id!=='string'||!/^[a-f0-9]{24}$/.test(b.id))return send(res,400,{error:'Rifa inválida'});const dates=raffleDates(b);const result=db.prepare('UPDATE raffles SET starts_at=?,ends_at=?,draw_at=? WHERE id=?').run(...dates,b.id);if(!result.changes)return send(res,404,{error:'Rifa no disponible'});audit('raffle_dates_changed',b.id);return send(res,200,{ok:true});}
 if(path==='/api/admin/raffles/status'&&req.method==='POST'){
