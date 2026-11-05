@@ -32,7 +32,9 @@ function raffleDates(b){const values=[b.startsAt,b.endsAt,b.drawAt];if(values.so
 // No per-person ticket cap: a buyer may take any number of available tickets. The reservation body is sized for a whole 100,000-ticket raffle.
 const MAX_TICKETS=100000,REVIEW_HOLD=48*3600000,RESERVATION_BODY=1100000;
 function paymentInfo(){const row=db.prepare("SELECT value FROM settings WHERE key='payment'").get();return row?JSON.parse(row.value):null;}
-function holdMs(){return (paymentInfo()?.holdHours||24)*3600000;}
+function holdMs(){return (paymentInfo()?.holdHours||5)*3600000;}
+// One-time raise: a saved payment window under 5 hours becomes 5 hours (afterwards the panel setting rules again).
+if(!db.prepare("SELECT 1 FROM settings WHERE key='hold_min_5h'").get()){const info=paymentInfo();if(info&&info.holdHours<5)db.prepare("UPDATE settings SET value=? WHERE key='payment'").run(JSON.stringify({...info,holdHours:5}));db.prepare("INSERT INTO settings VALUES('hold_min_5h','1')").run();}
 // Several raffles can be on sale at once. Without an id the newest one is used; an unknown or closed id gives none.
 const RAFFLE_COLUMNS="id,prize,description,price_cents,ticket_count,starts_at,ends_at,draw_at,COALESCE(rescheduled,0) AS rescheduled,photo IS NOT NULL AS has_photo";
 function activeRaffle(id){if(id==null)return db.prepare(`SELECT ${RAFFLE_COLUMNS} FROM raffles WHERE status='active' ORDER BY created DESC LIMIT 1`).get();return typeof id==='string'&&/^[a-f0-9]{24}$/.test(id)?db.prepare(`SELECT ${RAFFLE_COLUMNS} FROM raffles WHERE id=? AND status='active'`).get(id):undefined;}
@@ -108,13 +110,41 @@ sendWhatsApp(r.phone,text).then(()=>audit('whatsapp_sent',r.id)).catch(error=>{a
 if(hook){const headers={'Content-Type':'application/json'};if(process.env.N8N_WEBHOOK_SECRET)headers['X-Peso-Secret']=process.env.N8N_WEBHOOK_SECRET;
 fetch(hook,{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(10000)}).then(res=>{if(!res.ok)console.error('n8n_webhook_failed',res.status);}).catch(()=>console.error('n8n_webhook_failed'));}
 }
+// Contacts: every phone that reserves is kept (name, first and last time seen) so the panel can announce new raffles and draws.
+// Anyone stops the announcements by answering BAJA (or is marked by hand in the panel); opted-out phones get nothing from the outbox.
+db.exec("CREATE TABLE IF NOT EXISTS contacts(phone TEXT PRIMARY KEY,name TEXT,created INTEGER NOT NULL,last_seen INTEGER NOT NULL,opted_out INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS outbox(id INTEGER PRIMARY KEY,phone TEXT NOT NULL,text TEXT NOT NULL,kind TEXT NOT NULL,ref TEXT,batch TEXT,status TEXT NOT NULL DEFAULT 'queued',created INTEGER NOT NULL,sent INTEGER,error TEXT); CREATE INDEX IF NOT EXISTS outbox_queue ON outbox(status,id); CREATE INDEX IF NOT EXISTS outbox_ref ON outbox(kind,ref);");
+db.exec("INSERT OR IGNORE INTO contacts(phone,name,created,last_seen) SELECT phone,name,MIN(created),MAX(created) FROM reservations WHERE phone GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]' GROUP BY phone");
+function saveContact(phone,name,now){db.prepare('INSERT INTO contacts(phone,name,created,last_seen) VALUES(?,?,?,?) ON CONFLICT(phone) DO UPDATE SET name=excluded.name,last_seen=excluded.last_seen').run(phone,name,now,now);}
+const BROADCAST_FOOTER='\n\nSi ya no quieres recibir avisos, responde BAJA.';
+// Messages wait in the outbox and go out one at a time: expiry notices first, announcements every 8 to 16 seconds so the number is not flagged as spam.
+function queueMessage(phone,text,kind,ref=null,batch=null){if(!process.env.WAHA_URL||db.prepare('SELECT opted_out FROM contacts WHERE phone=?').get(phone)?.opted_out)return false;
+if(ref&&db.prepare('SELECT 1 FROM outbox WHERE kind=? AND ref=?').get(kind,ref))return false;
+db.prepare('INSERT INTO outbox(phone,text,kind,ref,batch,created) VALUES(?,?,?,?,?,?)').run(phone,text,kind,ref,batch,Date.now());return true;}
+function expiredText(r){const width=Math.max(3,String((r.ticket_count||1)-1).length),all=JSON.parse(r.numbers).map(n=>String(n).padStart(width,'0')),shown=all.length>40?`${all.slice(0,40).join(', ')} y ${all.length-40} más`:all.join(', ');
+const site=origin.replace(/^https?:\/\//,''),contact=paymentInfo()?.whatsapp,first=String(r.name||'').trim().split(/\s+/)[0];
+return [`Hola${first?`, ${first}`:''}. ⏰ Tu apartado en Peso Ganador venció porque no recibimos tu pago a tiempo.`,'',r.prize&&`Rifa: ${r.prize}`,`Boletos liberados: ${shown}`,'',r.raffle_status==='active'?`Esos boletos ya están disponibles otra vez. Si todavía los quieres, entra a ${site} y vuelve a apartarlos (mientras nadie más los tome).`:'Esos boletos quedaron disponibles de nuevo.','',contact?`¿Ya habías pagado? Escríbenos al ${contact} con tu comprobante y lo revisamos.`:'¿Ya habías pagado? Responde a este mensaje con tu comprobante y lo revisamos.'].filter(line=>line!==null&&line!==undefined&&line!==false).join('\n');}
+let outboxBusy=false,outboxNext=0;
+async function drainOutbox(){if(outboxBusy||!process.env.WAHA_URL||Date.now()<outboxNext)return;
+const row=db.prepare("SELECT id,phone,text,kind FROM outbox WHERE status='queued' ORDER BY CASE kind WHEN 'expired' THEN 0 ELSE 1 END,id LIMIT 1").get();if(!row)return;
+outboxBusy=true;const mark=(status,error=null)=>db.prepare('UPDATE outbox SET status=?,sent=?,error=? WHERE id=?').run(status,Date.now(),error,row.id);
+try{if(db.prepare('SELECT opted_out FROM contacts WHERE phone=?').get(row.phone)?.opted_out)mark('skipped');else{await sendWhatsApp(row.phone,row.text);mark('sent');}}
+catch(error){mark('failed',String(error.message||'error').slice(0,200));}
+finally{outboxBusy=false;outboxNext=Date.now()+(row.kind==='broadcast'?randomInt(8000,16001):3000);}}
+setInterval(()=>{drainOutbox().catch(error=>console.error('outbox_failed',error.message));},2000).unref();
+function broadcastStatus(){return db.prepare("SELECT batch,MIN(created) AS created,COUNT(*) AS total,SUM(status='queued') AS queued,SUM(status='sent') AS sent,SUM(status='failed') AS failed,SUM(status IN ('skipped','cancelled')) AS skipped FROM outbox WHERE kind='broadcast' GROUP BY batch ORDER BY created DESC LIMIT 1").get()||null;}
+// «BAJA» stops announcements and «ALTA» brings them back; anything else in a private chat is ignored.
+function optWord(text){if(typeof text!=='string'||text.length>20)return null;const word=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase().replace(/[.!¡]+/g,'');return {baja:'out',stop:'out',alto:'out',alta:'in'}[word]||null;}
 // Static files and prize photos carry an ETag: browsers reuse their copy (304) until the content changes.
 // Images may be reused for a week without asking; pages, styles and scripts are revalidated on every visit.
 const staticCache=new Map(),etagOf=body=>`"${createHash('sha1').update(body).digest('base64url')}"`;
 function staticFile(name){let entry=staticCache.get(name);if(!entry){const body=readFileSync(new URL(`public/${name}`,import.meta.url));entry={body,etag:etagOf(body)};staticCache.set(name,entry);}return entry;}
 function sendCached(req,res,body,etag,type,maxAge){res.setHeader('Content-Type',type);res.setHeader('ETag',etag);res.setHeader('Cache-Control',maxAge?`public, max-age=${maxAge}`:'no-cache');if(req.headers['if-none-match']===etag){res.writeHead(304);return res.end();}res.setHeader('Content-Length',body.length);return res.end(req.method==='HEAD'?undefined:body);}
 function send(res,status,value){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));}
-function expire(){const now=Date.now();db.prepare("DELETE FROM raffle_tickets WHERE reservation IN (SELECT id FROM reservations WHERE status='pending' AND expires < ?)").run(now);db.prepare("DELETE FROM tickets WHERE reservation IN (SELECT id FROM reservations WHERE status='pending' AND expires < ?)").run(now);db.prepare("UPDATE reservations SET status='expired' WHERE status='pending' AND expires < ?").run(now);}
+function expire(){const now=Date.now();
+// Each buyer whose hold runs out gets one WhatsApp saying the tickets are free again (queued, sent at a steady pace).
+const ending=db.prepare("SELECT r.id,r.name,r.phone,r.numbers,f.prize,f.ticket_count,f.status AS raffle_status FROM reservations r LEFT JOIN raffles f ON f.id=r.raffle WHERE r.status='pending' AND r.expires < ?").all(now);
+db.prepare("DELETE FROM raffle_tickets WHERE reservation IN (SELECT id FROM reservations WHERE status='pending' AND expires < ?)").run(now);db.prepare("DELETE FROM tickets WHERE reservation IN (SELECT id FROM reservations WHERE status='pending' AND expires < ?)").run(now);db.prepare("UPDATE reservations SET status='expired' WHERE status='pending' AND expires < ?").run(now);
+for(const r of ending)if(r.phone)queueMessage(r.phone,expiredText(r),'expired',r.id);}
 function problem(status,message){return Object.assign(Error(message),{status});}
 async function body(req,maxBytes=8192){
 if(!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type']||''))throw problem(415,'Se requiere application/json');
@@ -222,6 +252,12 @@ if(path==='/api/waha/webhook'&&req.method==='POST'){
 if(!adminGroup||!webhookSecret||!process.env.WAHA_URL)return send(res,404,{error:'No encontrado'});
 if(!validSecret(req.headers['x-peso-secret']))return send(res,401,{error:'No autorizado'});
 const b=await body(req,2097152),m=b.payload;
+// A buyer answering BAJA / ALTA in a private chat turns the announcements off or on for that phone.
+if(['message','message.any'].includes(b.event)&&m&&typeof m==='object'&&!m.fromMe&&typeof m.from==='string'&&/@(c\.us|s\.whatsapp\.net)$/.test(m.from)){const word=optWord(m.body),phone=m.from.split('@')[0].replace(/\D/g,'').slice(-10),id=String(m.id||''),now=Date.now();
+for(const [key,until] of answered)if(until<=now)answered.delete(key);
+if(word&&phone.length===10&&!(id&&answered.has(id))&&db.prepare('SELECT 1 FROM contacts WHERE phone=?').get(phone)){if(id)answered.set(id,now+600000);let allowed=true;try{limit('waha_optout',60,60000);}catch{allowed=false;}
+if(allowed){db.prepare('UPDATE contacts SET opted_out=? WHERE phone=?').run(word==='out'?1:0,phone);audit(word==='out'?'contact_opted_out':'contact_opted_in');
+wahaText(m.from,word==='out'?'Listo, ya no te enviaremos avisos de Peso Ganador. Si cambias de opinión, responde ALTA.':'¡Listo! Volverás a recibir avisos de nuevas rifas y sorteos de Peso Ganador. 🍀').catch(error=>console.error('whatsapp_optout_reply_failed',error.message));}}}
 if(['message','message.any'].includes(b.event)&&m&&typeof m==='object'&&m.from===adminGroup){const command=botCommand(m.body),id=String(m.id||'');
 // WAHA may deliver one message twice (retries, or both message events); each id is answered once.
 const now=Date.now();for(const [key,until] of answered)if(until<=now)answered.delete(key);
@@ -293,7 +329,7 @@ const previous=current?JSON.parse(current.numbers):[];
 numbers=[...previous,...nums];amount=numbers.length*raffle.price_cents;expires=Math.max(current?.expires||0,now+holdMs());const id=current?.id||randomBytes(12).toString('hex');
 if(current)db.prepare('UPDATE reservations SET numbers=?,amount_cents=?,expires=?,email=COALESCE(email,?) WHERE id=?').run(JSON.stringify(numbers),amount,expires,email,id);
 else db.prepare('INSERT INTO reservations(id,name,phone,numbers,status,created,expires,email,raffle,amount_cents,name_key) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(id,b.name.trim(),b.phone,JSON.stringify(numbers),'pending',now,expires,email,raffle.id,amount,normalizeName(b.name));
-for(const n of nums)db.prepare('INSERT INTO raffle_tickets VALUES(?,?,?)').run(raffle.id,n,id);db.exec('COMMIT');}catch{db.exec('ROLLBACK');return send(res,409,{error:'Algún boleto acaba de ser apartado. Actualiza tu selección.'});}
+for(const n of nums)db.prepare('INSERT INTO raffle_tickets VALUES(?,?,?)').run(raffle.id,n,id);saveContact(b.phone,b.name.trim(),now);db.exec('COMMIT');}catch{db.exec('ROLLBACK');return send(res,409,{error:'Algún boleto acaba de ser apartado. Actualiza tu selección.'});}
 return send(res,201,{numbers,added:nums.length,amount_cents:amount,expires,message:numbers.length>nums.length?'¡Agregamos los boletos a tu apartado! Paga el nuevo total antes de que venza y envía tu comprobante con tu teléfono.':'¡Boletos apartados! Realiza tu pago antes de que venza el apartado y envía tu comprobante con tu teléfono.'});
 }
 if(path==='/api/login'&&req.method==='POST'){
@@ -313,6 +349,19 @@ if(path==='/api/admin/password'&&req.method==='POST'){limit('change_password',5,
 if(path==='/api/admin/payment-settings'&&req.method==='GET')return send(res,200,paymentInfo());
 if(path==='/api/admin/visits'&&req.method==='GET')return send(res,200,visitStats());
 if(path==='/api/admin/summary'&&req.method==='GET'){expire();return send(res,200,salesSummary());}
+if(path==='/api/admin/contacts'&&req.method==='GET'){const contacts=db.prepare("SELECT c.phone,c.name,c.created,c.last_seen,c.opted_out,(SELECT COUNT(*) FROM reservations r WHERE r.phone=c.phone AND r.status='paid') AS purchases FROM contacts c ORDER BY c.last_seen DESC LIMIT 5000").all();
+const since=Date.now()-86400000,expired=db.prepare("SELECT COUNT(*) AS total,SUM(status='sent') AS sent,SUM(status='failed') AS failed FROM outbox WHERE kind='expired' AND created>=?").get(since);
+return send(res,200,{contacts,total:db.prepare('SELECT COUNT(*) AS n FROM contacts').get().n,active:db.prepare('SELECT COUNT(*) AS n FROM contacts WHERE opted_out=0').get().n,whatsapp:!!process.env.WAHA_URL,broadcast:broadcastStatus(),expired,footer:BROADCAST_FOOTER.trim()});}
+if(path==='/api/admin/contacts/opt'&&req.method==='POST'){const b=await body(req);if(typeof b.phone!=='string'||!/^\d{10}$/.test(b.phone)||typeof b.out!=='boolean')return send(res,400,{error:'Contacto no válido.'});
+if(!db.prepare('UPDATE contacts SET opted_out=? WHERE phone=?').run(b.out?1:0,b.phone).changes)return send(res,404,{error:'Ese contacto no existe.'});audit(b.out?'contact_opted_out_admin':'contact_opted_in_admin');return send(res,200,{ok:true});}
+if(path==='/api/admin/broadcast'&&req.method==='POST'){const b=await body(req,16384),text=typeof b.text==='string'?b.text.trim():'';
+if(!process.env.WAHA_URL)return send(res,409,{error:'WhatsApp (WAHA) no está conectado en el servidor.'});
+if(text.length<10||text.length>1500)return send(res,400,{error:'Escribe un mensaje de 10 a 1,500 caracteres.'});
+if(db.prepare("SELECT 1 FROM outbox WHERE kind='broadcast' AND status='queued' LIMIT 1").get())return send(res,409,{error:'Todavía se está enviando un aviso. Espera a que termine o cancélalo.'});
+const batch=randomBytes(8).toString('hex'),phones=db.prepare('SELECT phone FROM contacts WHERE opted_out=0 ORDER BY last_seen DESC').all();if(!phones.length)return send(res,409,{error:'Aún no tienes contactos para avisar.'});
+db.exec('BEGIN IMMEDIATE');try{for(const {phone} of phones)queueMessage(phone,text+BROADCAST_FOOTER,'broadcast',null,batch);db.exec('COMMIT');}catch(error){db.exec('ROLLBACK');throw error;}
+audit('broadcast_queued');return send(res,201,{queued:phones.length,status:broadcastStatus()});}
+if(path==='/api/admin/broadcast/cancel'&&req.method==='POST'){const n=db.prepare("UPDATE outbox SET status='cancelled' WHERE kind='broadcast' AND status='queued'").run().changes;audit('broadcast_cancelled');return send(res,200,{cancelled:n,status:broadcastStatus()});}
 if(path==='/api/admin/payment-settings'&&req.method==='POST'){const info=paymentSettings(await body(req));db.prepare("INSERT INTO settings VALUES('payment',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(info));audit('payment_settings_changed');return send(res,200,info);}
 if(path==='/api/admin/raffles/dates'&&req.method==='POST'){const b=await body(req);if(typeof b.id!=='string'||!/^[a-f0-9]{24}$/.test(b.id))return send(res,400,{error:'Rifa inválida'});const dates=raffleDates(b);const result=db.prepare('UPDATE raffles SET starts_at=?,ends_at=?,draw_at=? WHERE id=?').run(...dates,b.id);if(!result.changes)return send(res,404,{error:'Rifa no disponible'});audit('raffle_dates_changed',b.id);return send(res,200,{ok:true});}
 if(path==='/api/admin/raffles/status'&&req.method==='POST'){

@@ -91,3 +91,10 @@ printf '%s' "$nueva" | docker compose exec -T web node reset-admin-password.mjs
 unset nueva
 docker compose restart web
 ```
+
+## Avisos por WhatsApp y vencimientos
+
+- Cada teléfono que aparta boletos queda en **Avisos y contactos** (también los apartados anteriores). Desde ahí se envía un aviso de rifa nueva, un recordatorio de sorteo o un mensaje libre a todos los contactos, uno cada 8 a 16 segundos. Cada aviso termina con «Si ya no quieres recibir avisos, responde BAJA»; quien responde BAJA (o ALTA para volver) queda marcado solo. También se puede marcar a mano en el panel, y la lista se descarga en CSV.
+- Cuando vence un apartado sin pago, el cliente recibe un WhatsApp con sus boletos liberados y la invitación a volver a apartarlos en el sitio.
+- El tiempo para pagar es de 5 horas por defecto; los valores guardados menores a 5 horas se subieron a 5 una sola vez. Se cambia en **Datos de pago**.
+- Los mensajes esperan en la tabla `outbox`, así que un reinicio no los pierde.
