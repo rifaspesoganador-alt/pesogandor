@@ -203,3 +203,20 @@
 :root[data-theme=light] .raffle-new-tile{border-color:#b06a3a55;color:#8a5a3a}:root[data-theme=light] .raffle-new-tile:hover{border-color:#d0590f;color:#d0590f}
 :root[data-theme=light] .settings-tabs{background:#fdf7f1;border-color:#b06a3a33}:root[data-theme=light] .settings-tabs button{color:#8a5a3a}
 :root[data-theme=light] .settings-tabs button[aria-selected=true]{background:#d0590f;color:#fff}
+/* Liberar boletos (Participaciones) */
+.release-panel{grid-column:1/-1;border:1px solid #a77c5f40;border-radius:12px;background:#ff873d08;padding:18px;display:grid;gap:12px}
+.release-title{margin:0;font-weight:700;color:#ffcca8}
+.release-keep{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.release-keep-label{display:flex;align-items:center;gap:8px;font-size:13px;color:#d8b9a3}
+.release-keep-label input{width:84px;padding:8px 10px}
+.release-chips{display:flex;flex-wrap:wrap;gap:6px;max-height:260px;overflow:auto;padding:2px}
+.release-chip{font:inherit;font-size:12px;cursor:pointer;border:1px solid #a77c5f40;border-radius:5px;background:transparent;color:#ffcca8;padding:7px 10px}
+.release-chip:hover{border-color:#ff873d99}
+.release-chip[aria-pressed=true]{background:#ff6b6b26;border-color:#ff6b6b;color:#ff9c9c;text-decoration:line-through}
+.release-summary{margin:0;font-size:13px;color:#d8b9a3}
+.release-actions{display:flex;gap:8px;flex-wrap:wrap}
+.record-action .button.outline{margin-left:8px}
+:root[data-theme=light] .release-title,:root[data-theme=light] .release-chip{color:#b44a08}
+:root[data-theme=light] .release-keep-label,:root[data-theme=light] .release-summary{color:#6b4a35}
+:root[data-theme=light] .release-chip[aria-pressed=true]{color:#c0392b;border-color:#c0392b;background:#c0392b14}
+@media (max-width:720px){.record-action .button.outline{margin-left:0}.release-panel{padding:14px}}
