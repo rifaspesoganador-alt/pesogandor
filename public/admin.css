@@ -226,3 +226,5 @@
 #auto-reply-form textarea{font-family:inherit;line-height:1.5;resize:vertical}
 .auto-reply-toggle{display:flex;align-items:center;gap:10px;font-weight:600}
 .auto-reply-toggle input{width:20px;height:20px;accent-color:#ff873d}
+
+.auto-reply-sub{margin:18px 0 0;font-size:18px}
