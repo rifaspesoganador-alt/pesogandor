@@ -170,7 +170,7 @@ const passwordForm=document.querySelector('#password-form');passwordForm.onsubmi
 // Avisos y contactos: every phone that reserved, WhatsApp announcements for a new raffle or a draw, and BAJA handling.
 let latestRaffles=[],contactRows=[],contactInfo=null,broadcastTimer=null,broadcastEdited=false;
 const broadcastForm=document.querySelector('#broadcast-form'),broadcastRaffle=document.querySelector('#broadcast-raffle'),broadcastMessage=document.querySelector('#broadcast-message');
-const CHANNEL_URL='https://whatsapp.com/channel/0029Vb9OUzU5Ejy0vwAyaI0d';
+const CHANNEL_URL='https://whatsapp.com/channel/0029VbEdGGJEFeXhw2C8xJ2z';
 const longDate=value=>value?new Date(value).toLocaleString('es-MX',{timeZone:'America/Mexico_City',dateStyle:'full',timeStyle:'short'}):'Por confirmar';
 function fillBroadcastRaffles(){const current=broadcastRaffle.value,list=latestRaffles.filter(raffle=>raffle.status==='active'||raffle.status==='closed');broadcastRaffle.replaceChildren();
 if(!list.length){const option=element('option','','No hay rifas en venta');option.value='';broadcastRaffle.append(option);}
