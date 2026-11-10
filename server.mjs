@@ -133,6 +133,42 @@ finally{outboxBusy=false;outboxNext=Date.now()+(row.kind==='broadcast'?randomInt
 setInterval(()=>{drainOutbox().catch(error=>console.error('outbox_failed',error.message));},2000).unref();
 function broadcastStatus(){return db.prepare("SELECT batch,MIN(created) AS created,COUNT(*) AS total,SUM(status='queued') AS queued,SUM(status='sent') AS sent,SUM(status='failed') AS failed,SUM(status IN ('skipped','cancelled')) AS skipped FROM outbox WHERE kind='broadcast' GROUP BY batch ORDER BY created DESC LIMIT 1").get()||null;}
 // «BAJA» stops announcements and «ALTA» brings them back; anything else in a private chat is ignored.
+// Automatic answer for people who write from an ad («¡Hola! Quiero más información»). The text and the trigger words are edited in Panel → Ajustes.
+const AUTO_REPLY_DEFAULT={enabled:true,keywords:'información, informes, info, precio, costo',text:`🍀 *EL PESO GANADOR* 🍀
+¡Hola! Gracias por escribirnos. Aquí tienes toda la información de nuestra rifa:
+
+💸 *PREMIO MAYOR: $50,000 MXN*
+🎁 *+ 4 BONOS de $2,500 MXN cada uno*
+
+🎟️ *Precio por boleto: $1.60 MXN*
+Puedes apartar los boletos que quieras: entre más tengas, más oportunidades de ganar.
+
+🎯 *¿Cómo se eligen los ganadores?*
+Usamos los resultados oficiales de los sorteos de Pronósticos. Gana el boleto que coincida con los *últimos 5 dígitos* del resultado de cada sorteo:
+• *Premio mayor ($50,000)* → Tris Clásico
+• *Bono 1 ($2,500)* → Melate
+• *Bono 2 ($2,500)* → Revancha
+• *Bono 3 ($2,500)* → Revanchita
+• *Bono 4 ($2,500)* → Chispazo
+
+⚠️ *IMPORTANTE*
+1. Para ganar los bonos necesitas comprar *más de 100 boletos*, seguir nuestra página de Facebook y unirte a nuestro canal de WhatsApp.
+2. Los premios no son válidos si se desprecian boletos.
+
+📺 *Transmisión EN VIVO*
+Anunciaremos a los ganadores en vivo por nuestra página de Facebook ➡️ *EL PESO GANADOR* ⬅️ el *29 de noviembre a las 8:30 pm* 🍀
+
+🛒 *¿Cómo apartar tus boletos?*
+1. Entra a pesoganador.com
+2. Elige tus números y apártalos con tu nombre y teléfono.
+3. Paga y envía tu comprobante desde la misma página antes de que venza tu apartado.
+
+📲 ¡Aparta tus números hoy mismo y no te quedes fuera!`};
+function autoReplyConfig(){const row=db.prepare("SELECT value FROM settings WHERE key='auto_reply'").get();return row?{...AUTO_REPLY_DEFAULT,...JSON.parse(row.value)}:AUTO_REPLY_DEFAULT;}
+const plainText=text=>text.normalize('NFD').replace(/\p{M}/gu,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+function wantsInfo(text,keywords){if(typeof text!=='string'||!text.trim()||text.length>400)return false;const said=` ${plainText(text)} `;return String(keywords||'').split(',').map(plainText).filter(Boolean).some(word=>said.includes(` ${word} `));}
+db.exec('CREATE TABLE IF NOT EXISTS auto_replies(chat TEXT PRIMARY KEY,last INTEGER NOT NULL)');
+const AUTO_REPLY_GAP=12*3600000;
 function optWord(text){if(typeof text!=='string'||text.length>20)return null;const word=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase().replace(/[.!¡]+/g,'');return {baja:'out',stop:'out',alto:'out',alta:'in'}[word]||null;}
 // Static files and prize photos carry an ETag: browsers reuse their copy (304) until the content changes.
 // Images may be reused for a week without asking; pages, styles and scripts are revalidated on every visit.
@@ -258,6 +294,13 @@ for(const [key,until] of answered)if(until<=now)answered.delete(key);
 if(word&&phone.length===10&&!(id&&answered.has(id))&&db.prepare('SELECT 1 FROM contacts WHERE phone=?').get(phone)){if(id)answered.set(id,now+600000);let allowed=true;try{limit('waha_optout',60,60000);}catch{allowed=false;}
 if(allowed){db.prepare('UPDATE contacts SET opted_out=? WHERE phone=?').run(word==='out'?1:0,phone);audit(word==='out'?'contact_opted_out':'contact_opted_in');
 wahaText(m.from,word==='out'?'Listo, ya no te enviaremos avisos de Peso Ganador. Si cambias de opinión, responde ALTA.':'¡Listo! Volverás a recibir avisos de nuevas rifas y sorteos de Peso Ganador. 🍀').catch(error=>console.error('whatsapp_optout_reply_failed',error.message));}}}
+// Someone asking for information in a private chat (usually from an ad) gets the info text, at most once every 12 hours per chat.
+if(['message','message.any'].includes(b.event)&&m&&typeof m==='object'&&!m.fromMe&&typeof m.from==='string'&&/@(c\.us|s\.whatsapp\.net|lid)$/.test(m.from)&&!optWord(m.body)){const config=autoReplyConfig(),id=String(m.id||''),now=Date.now();
+if(config.enabled&&config.text&&wantsInfo(m.body,config.keywords)&&!(id&&answered.has(id))){if(id)answered.set(id,now+600000);const last=db.prepare('SELECT last FROM auto_replies WHERE chat=?').get(m.from)?.last||0;let allowed=now-last>=AUTO_REPLY_GAP;if(allowed)try{limit('waha_autoreply',120,60000);}catch{allowed=false;}
+if(allowed){db.prepare('INSERT INTO auto_replies(chat,last) VALUES(?,?) ON CONFLICT(chat) DO UPDATE SET last=excluded.last').run(m.from,now);
+// A Mexican phone that asks for information joins the contacts (without replacing a buyer's name), so it also receives the announcements; BAJA removes it.
+const phone=m.from.split('@')[0].replace(/\D/g,'');if(/@(c\.us|s\.whatsapp\.net)$/.test(m.from)&&/^521?\d{10}$/.test(phone)){const name=String(m._data?.notifyName||m.notifyName||'Interesado por anuncio').slice(0,100);db.prepare('INSERT OR IGNORE INTO contacts(phone,name,created,last_seen) VALUES(?,?,?,?)').run(phone.slice(-10),name,now,now);}
+wahaText(m.from,config.text).then(()=>audit('whatsapp_auto_reply')).catch(error=>console.error('whatsapp_auto_reply_failed',error.message));}}}
 if(['message','message.any'].includes(b.event)&&m&&typeof m==='object'&&m.from===adminGroup){const command=botCommand(m.body),id=String(m.id||'');
 // WAHA may deliver one message twice (retries, or both message events); each id is answered once.
 const now=Date.now();for(const [key,until] of answered)if(until<=now)answered.delete(key);
@@ -346,6 +389,10 @@ res.setHeader('Set-Cookie',[cookie(sessionToken,3600),`${OWNER_COOKIE}=1; HttpOn
 if(path.startsWith('/api/admin/')){
 if(!admin(req))return send(res,401,{error:'Inicia sesión'});
 if(path==='/api/admin/password'&&req.method==='POST'){limit('change_password',5,900000);const b=await body(req);if(!credentials.verify(b.currentPassword))return send(res,401,{error:'La contraseña actual no coincide.'});if(typeof b.newPassword!=='string'||b.newPassword.length<5||b.newPassword.length>200)return send(res,400,{error:'La contraseña debe tener entre 5 y 200 caracteres.'});credentials.save(b.newPassword);const current=token(req);for(const key of sessions.keys())if(key!==current)sessions.delete(key);audit('password_changed');return send(res,200,{ok:true});}
+if(path==='/api/admin/auto-reply'&&req.method==='GET'){const config=autoReplyConfig(),sent=db.prepare("SELECT COUNT(*) AS n FROM audit WHERE event='whatsapp_auto_reply' AND created>=?").get(Date.now()-7*86400000).n;return send(res,200,{...config,whatsapp:Boolean(process.env.WAHA_URL&&adminGroup&&webhookSecret),sentWeek:sent});}
+if(path==='/api/admin/auto-reply'&&req.method==='POST'){const b=await body(req);const text=typeof b.text==='string'?b.text.replace(/\r\n/g,'\n').trim():'',keywords=typeof b.keywords==='string'?b.keywords.trim():'';
+if(text.length<20||text.length>3000)return send(res,400,{error:'El mensaje debe tener entre 20 y 3,000 caracteres.'});if(!keywords.split(',').map(plainText).filter(Boolean).length||keywords.length>300)return send(res,400,{error:'Escribe al menos una palabra clave (separadas por comas).'});
+const config={enabled:b.enabled===true,keywords,text};db.prepare("INSERT INTO settings VALUES('auto_reply',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(config));audit('auto_reply_changed');return send(res,200,config);}
 if(path==='/api/admin/payment-settings'&&req.method==='GET')return send(res,200,paymentInfo());
 if(path==='/api/admin/visits'&&req.method==='GET')return send(res,200,visitStats());
 if(path==='/api/admin/summary'&&req.method==='GET'){expire();return send(res,200,salesSummary());}
