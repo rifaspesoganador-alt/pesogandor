@@ -220,3 +220,9 @@
 :root[data-theme=light] .release-keep-label,:root[data-theme=light] .release-summary{color:#6b4a35}
 :root[data-theme=light] .release-chip[aria-pressed=true]{color:#c0392b;border-color:#c0392b;background:#c0392b14}
 @media (max-width:720px){.record-action .button.outline{margin-left:0}.release-panel{padding:14px}}
+
+/* Ajustes → Respuesta automática */
+#auto-reply-form{display:grid;gap:14px;max-width:760px}
+#auto-reply-form textarea{font-family:inherit;line-height:1.5;resize:vertical}
+.auto-reply-toggle{display:flex;align-items:center;gap:10px;font-weight:600}
+.auto-reply-toggle input{width:20px;height:20px;accent-color:#ff873d}
