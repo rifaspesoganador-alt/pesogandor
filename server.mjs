@@ -163,12 +163,31 @@ Anunciaremos a los ganadores en vivo por nuestra página de Facebook ➡️ *EL 
 2. Elige tus números y apártalos con tu nombre y teléfono.
 3. Paga y envía tu comprobante desde la misma página antes de que venza tu apartado.
 
-📲 ¡Aparta tus números hoy mismo y no te quedes fuera!`};
+📲 ¡Aparta tus números hoy mismo y no te quedes fuera!`,followEnabled:true,followHours:2,followText:`¡Hola! 👋 Hace un rato te compartimos la información de la rifa de *El Peso Ganador* 🍀
+
+¿Te quedó alguna duda o necesitas ayuda para apartar tus boletos? Responde a este mensaje y con gusto te ayudamos. También puedes apartarlos directo en pesoganador.com
+
+📢 Únete a nuestro canal de WhatsApp *El Peso Ganador* para enterarte de nuevas rifas, resultados y transmisiones en vivo:
+https://whatsapp.com/channel/0029VbEdGGJEFeXhw2C8xJ2z`};
 function autoReplyConfig(){const row=db.prepare("SELECT value FROM settings WHERE key='auto_reply'").get();return row?{...AUTO_REPLY_DEFAULT,...JSON.parse(row.value)}:AUTO_REPLY_DEFAULT;}
 const plainText=text=>text.normalize('NFD').replace(/\p{M}/gu,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 function wantsInfo(text,keywords){if(typeof text!=='string'||!text.trim()||text.length>400)return false;const said=` ${plainText(text)} `;return String(keywords||'').split(',').map(plainText).filter(Boolean).some(word=>said.includes(` ${word} `));}
 db.exec('CREATE TABLE IF NOT EXISTS auto_replies(chat TEXT PRIMARY KEY,last INTEGER NOT NULL)');
+for(const column of ['last_in','last_out','followup'])if(!hasColumn('auto_replies',column))db.exec(`ALTER TABLE auto_replies ADD COLUMN ${column} INTEGER`);
 const AUTO_REPLY_GAP=12*3600000;
+// Follow-up: a chat that got the info text and then stayed silent (no message from them, no manual answer from us, no tickets reserved)
+// receives followText once, followHours after the info. Chats older than a day are left alone.
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));let followRunning=false;
+async function sendFollowUps(){if(followRunning||!process.env.WAHA_URL)return;const config=autoReplyConfig();if(!config.followEnabled||!config.followText)return;followRunning=true;
+try{const now=Date.now(),due=now-config.followHours*3600000;
+const rows=db.prepare('SELECT chat,last FROM auto_replies WHERE followup IS NULL AND last<=? AND last>=? AND COALESCE(last_in,0)<last AND COALESCE(last_out,0)<last ORDER BY last LIMIT 20').all(due,now-86400000);
+for(const row of rows){const phone=row.chat.split('@')[0].replace(/\D/g,'').slice(-10),isPhone=/@(c\.us|s\.whatsapp\.net)$/.test(row.chat);
+const skip=isPhone&&(db.prepare('SELECT 1 FROM contacts WHERE phone=? AND opted_out=1').get(phone)||db.prepare('SELECT 1 FROM reservations WHERE phone=? AND created>=? LIMIT 1').get(phone,row.last));
+// Marked before sending, so a failure or a restart never sends it twice.
+const marked=db.prepare('UPDATE auto_replies SET followup=? WHERE chat=? AND followup IS NULL').run(skip?-1:now,row.chat).changes;if(!marked||skip)continue;
+try{await wahaText(row.chat,config.followText);audit('whatsapp_follow_up');}catch(error){console.error('whatsapp_follow_up_failed',error.message);}await sleep(4000);}}
+finally{followRunning=false;}}
+setInterval(()=>{sendFollowUps().catch(error=>console.error('follow_up_failed',error.message));},60000).unref();
 function optWord(text){if(typeof text!=='string'||text.length>20)return null;const word=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase().replace(/[.!¡]+/g,'');return {baja:'out',stop:'out',alto:'out',alta:'in'}[word]||null;}
 // Static files and prize photos carry an ETag: browsers reuse their copy (304) until the content changes.
 // Images may be reused for a week without asking; pages, styles and scripts are revalidated on every visit.
@@ -294,10 +313,14 @@ for(const [key,until] of answered)if(until<=now)answered.delete(key);
 if(word&&phone.length===10&&!(id&&answered.has(id))&&db.prepare('SELECT 1 FROM contacts WHERE phone=?').get(phone)){if(id)answered.set(id,now+600000);let allowed=true;try{limit('waha_optout',60,60000);}catch{allowed=false;}
 if(allowed){db.prepare('UPDATE contacts SET opted_out=? WHERE phone=?').run(word==='out'?1:0,phone);audit(word==='out'?'contact_opted_out':'contact_opted_in');
 wahaText(m.from,word==='out'?'Listo, ya no te enviaremos avisos de Peso Ganador. Si cambias de opinión, responde ALTA.':'¡Listo! Volverás a recibir avisos de nuevas rifas y sorteos de Peso Ganador. 🍀').catch(error=>console.error('whatsapp_optout_reply_failed',error.message));}}}
+// After the info text, any message from that person, or one written by hand from our phone, means the conversation is alive: no follow-up.
+if(['message','message.any'].includes(b.event)&&m&&typeof m==='object'){const chat=m.fromMe?m.to:m.from;if(typeof chat==='string'&&/@(c\.us|s\.whatsapp\.net|lid)$/.test(chat)){const at=Number(m.timestamp)>1e9?Number(m.timestamp)*1000:Date.now();
+if(m.fromMe){const config=autoReplyConfig(),text=String(m.body||'').trim();if(text&&text!==String(config.text).trim()&&text!==String(config.followText).trim())db.prepare('UPDATE auto_replies SET last_out=MAX(COALESCE(last_out,0),?) WHERE chat=?').run(at,chat);}
+else db.prepare('UPDATE auto_replies SET last_in=MAX(COALESCE(last_in,0),?) WHERE chat=?').run(at,chat);}}
 // Someone asking for information in a private chat (usually from an ad) gets the info text, at most once every 12 hours per chat.
 if(['message','message.any'].includes(b.event)&&m&&typeof m==='object'&&!m.fromMe&&typeof m.from==='string'&&/@(c\.us|s\.whatsapp\.net|lid)$/.test(m.from)&&!optWord(m.body)){const config=autoReplyConfig(),id=String(m.id||''),now=Date.now();
 if(config.enabled&&config.text&&wantsInfo(m.body,config.keywords)&&!(id&&answered.has(id))){if(id)answered.set(id,now+600000);const last=db.prepare('SELECT last FROM auto_replies WHERE chat=?').get(m.from)?.last||0;let allowed=now-last>=AUTO_REPLY_GAP;if(allowed)try{limit('waha_autoreply',120,60000);}catch{allowed=false;}
-if(allowed){db.prepare('INSERT INTO auto_replies(chat,last) VALUES(?,?) ON CONFLICT(chat) DO UPDATE SET last=excluded.last').run(m.from,now);
+if(allowed){db.prepare('INSERT INTO auto_replies(chat,last) VALUES(?,?) ON CONFLICT(chat) DO UPDATE SET last=excluded.last,last_in=NULL,last_out=NULL,followup=NULL').run(m.from,now);
 // A Mexican phone that asks for information joins the contacts (without replacing a buyer's name), so it also receives the announcements; BAJA removes it.
 const phone=m.from.split('@')[0].replace(/\D/g,'');if(/@(c\.us|s\.whatsapp\.net)$/.test(m.from)&&/^521?\d{10}$/.test(phone)){const name=String(m._data?.notifyName||m.notifyName||'Interesado por anuncio').slice(0,100);db.prepare('INSERT OR IGNORE INTO contacts(phone,name,created,last_seen) VALUES(?,?,?,?)').run(phone.slice(-10),name,now,now);}
 wahaText(m.from,config.text).then(()=>audit('whatsapp_auto_reply')).catch(error=>console.error('whatsapp_auto_reply_failed',error.message));}}}
@@ -389,10 +412,12 @@ res.setHeader('Set-Cookie',[cookie(sessionToken,3600),`${OWNER_COOKIE}=1; HttpOn
 if(path.startsWith('/api/admin/')){
 if(!admin(req))return send(res,401,{error:'Inicia sesión'});
 if(path==='/api/admin/password'&&req.method==='POST'){limit('change_password',5,900000);const b=await body(req);if(!credentials.verify(b.currentPassword))return send(res,401,{error:'La contraseña actual no coincide.'});if(typeof b.newPassword!=='string'||b.newPassword.length<5||b.newPassword.length>200)return send(res,400,{error:'La contraseña debe tener entre 5 y 200 caracteres.'});credentials.save(b.newPassword);const current=token(req);for(const key of sessions.keys())if(key!==current)sessions.delete(key);audit('password_changed');return send(res,200,{ok:true});}
-if(path==='/api/admin/auto-reply'&&req.method==='GET'){const config=autoReplyConfig(),sent=db.prepare("SELECT COUNT(*) AS n FROM audit WHERE event='whatsapp_auto_reply' AND created>=?").get(Date.now()-7*86400000).n;return send(res,200,{...config,whatsapp:Boolean(process.env.WAHA_URL&&adminGroup&&webhookSecret),sentWeek:sent});}
+if(path==='/api/admin/auto-reply'&&req.method==='GET'){const config=autoReplyConfig(),sent=db.prepare("SELECT COUNT(*) AS n FROM audit WHERE event='whatsapp_auto_reply' AND created>=?").get(Date.now()-7*86400000).n;const followWeek=db.prepare("SELECT COUNT(*) AS n FROM audit WHERE event='whatsapp_follow_up' AND created>=?").get(Date.now()-7*86400000).n;return send(res,200,{...config,whatsapp:Boolean(process.env.WAHA_URL&&adminGroup&&webhookSecret),sentWeek:sent,followWeek});}
 if(path==='/api/admin/auto-reply'&&req.method==='POST'){const b=await body(req);const text=typeof b.text==='string'?b.text.replace(/\r\n/g,'\n').trim():'',keywords=typeof b.keywords==='string'?b.keywords.trim():'';
 if(text.length<20||text.length>3000)return send(res,400,{error:'El mensaje debe tener entre 20 y 3,000 caracteres.'});if(!keywords.split(',').map(plainText).filter(Boolean).length||keywords.length>300)return send(res,400,{error:'Escribe al menos una palabra clave (separadas por comas).'});
-const config={enabled:b.enabled===true,keywords,text};db.prepare("INSERT INTO settings VALUES('auto_reply',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(config));audit('auto_reply_changed');return send(res,200,config);}
+const followText=typeof b.followText==='string'?b.followText.replace(/\r\n/g,'\n').trim():'',followHours=Number(b.followHours);
+if(followText.length<20||followText.length>3000)return send(res,400,{error:'El mensaje de seguimiento debe tener entre 20 y 3,000 caracteres.'});if(!Number.isInteger(followHours)||followHours<1||followHours>20)return send(res,400,{error:'El seguimiento se envía entre 1 y 20 horas después.'});
+const config={enabled:b.enabled===true,keywords,text,followEnabled:b.followEnabled===true,followHours,followText};db.prepare("INSERT INTO settings VALUES('auto_reply',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(config));audit('auto_reply_changed');return send(res,200,config);}
 if(path==='/api/admin/payment-settings'&&req.method==='GET')return send(res,200,paymentInfo());
 if(path==='/api/admin/visits'&&req.method==='GET')return send(res,200,visitStats());
 if(path==='/api/admin/summary'&&req.method==='GET'){expire();return send(res,200,salesSummary());}
