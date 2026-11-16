@@ -228,3 +228,10 @@
 .auto-reply-toggle input{width:20px;height:20px;accent-color:#ff873d}
 
 .auto-reply-sub{margin:18px 0 0;font-size:18px}
+
+/* Paquetes de descuento (rifas) */
+.bundle-rows{display:grid;gap:10px;margin:8px 0}
+.bundle-row{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end}
+.bundle-preview{margin:10px 0 0;font-size:13px;color:#d8b9a3}
+:root[data-theme=light] .bundle-preview{color:#6b4a35}
+@media (max-width:720px){.bundle-row{grid-template-columns:1fr 1fr}.bundle-row .button{grid-column:1/-1}}

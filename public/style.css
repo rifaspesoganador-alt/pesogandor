@@ -201,3 +201,25 @@ h2 em,.raffle-prize em,.lucky-copy h3 em,.payment-details h3 em{color:var(--lime
 .wa-float-label{display:none;font-weight:600;font-size:14px}body.has-selection .wa-float{bottom:104px}
 @media(min-width:1000px){.wa-float-label{display:inline}.wa-float{padding:0 20px 0 16px}}
 @media(max-width:700px){.wa-float{right:14px;bottom:14px;width:54px;height:54px;min-width:0;padding:0}body.has-selection .wa-float{bottom:96px}}
+/* Paquetes con descuento */
+.bundle-offers{margin:32px 0 0;padding:28px 30px;border:1px solid #c9ae6945;border-radius:14px;background:radial-gradient(ellipse at 95% 0,#e8c77714,transparent 60%),#10190f}
+.bundle-head h3{margin:6px 0 8px}
+.bundle-head h3 em{color:var(--lime)}
+.bundle-head p:last-child{margin:0;color:var(--muted);max-width:640px}
+.bundle-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:20px}
+.bundle-card{display:grid;gap:4px;text-align:left;font:inherit;color:var(--ink);cursor:pointer;padding:16px;border:1px solid #c5f85b40;border-radius:12px;background:#c5f85b0a;transition:transform .15s,border-color .15s,background .15s}
+.bundle-card:hover,.bundle-card:focus-visible{transform:translateY(-2px);border-color:var(--lime);background:#c5f85b17}
+.bundle-card strong{font-size:15px}
+.bundle-price{font-size:26px;font-weight:800;color:#e8c777}
+.bundle-card small{color:var(--lime);font-weight:700;min-height:1em}
+.bundle-go{margin-top:6px;font-size:12px;color:var(--muted)}
+.bundle-hint{margin:14px 0 0;color:#e8c777;font-weight:700;min-height:1.2em}
+.bundle-hint:empty{display:none}
+:root[data-theme=light] .bundle-offers{background:radial-gradient(ellipse at 95% 0,#e8c77722,transparent 60%),#fff}
+:root[data-theme=light] .bundle-card{color:#1d2a17;background:#3b630408;border-color:#3b630440}
+:root[data-theme=light] .bundle-card small,:root[data-theme=light] .bundle-head h3 em{color:#3b6304}
+:root[data-theme=light] .bundle-price,:root[data-theme=light] .bundle-hint{color:#9a6a00}
+@media(max-width:600px){.bundle-offers{padding:22px}.bundle-list{grid-template-columns:1fr 1fr}.bundle-price{font-size:22px}}
+
+.bundle-head h3{font-family:var(--display);font-weight:400;font-synthesis:none;letter-spacing:.5px;line-height:1.04;font-size:32px;margin:6px 0 12px}
+@media(max-width:600px){.bundle-head h3{font-size:28px}}
