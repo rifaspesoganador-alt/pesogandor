@@ -36,6 +36,7 @@ function raffleDates(b){const values=[b.startsAt,b.endsAt,b.drawAt];if(values.so
 // No per-person ticket cap: a buyer may take any number of available tickets. The reservation body is sized for a whole 100,000-ticket raffle.
 const MAX_TICKETS=100000,REVIEW_HOLD=48*3600000,RESERVATION_BODY=1100000;
 function paymentInfo(){const row=db.prepare("SELECT value FROM settings WHERE key='payment'").get();return row?JSON.parse(row.value):null;}
+function metaPixelId(){return db.prepare("SELECT value FROM settings WHERE key='meta_pixel'").get()?.value||null;}
 function holdMs(){return (paymentInfo()?.holdHours||5)*3600000;}
 // One-time raise: a saved payment window under 5 hours becomes 5 hours (afterwards the panel setting rules again).
 if(!db.prepare("SELECT 1 FROM settings WHERE key='hold_min_5h'").get()){const info=paymentInfo();if(info&&info.holdHours<5)db.prepare("UPDATE settings SET value=? WHERE key='payment'").run(JSON.stringify({...info,holdHours:5}));db.prepare("INSERT INTO settings VALUES('hold_min_5h','1')").run();}
@@ -300,7 +301,7 @@ setInterval(()=>{const now=Date.now();for(const [key,s] of sessions)if(s.expires
 // Expired holds are released once a minute and before every write, not on each page view.
 expire();setInterval(expire,60000).unref();
 const server=http.createServer({maxHeaderSize:16384,requestTimeout:30000,headersTimeout:10000},async(req,res)=>{
-res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','same-origin');res.setHeader('Cache-Control','no-store');res.setHeader('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','same-origin');res.setHeader('Cache-Control','no-store');res.setHeader('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self' https://connect.facebook.net; img-src 'self' data: https://www.facebook.com; connect-src 'self' https://www.facebook.com https://connect.facebook.net; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
 res.setHeader('X-Frame-Options','DENY');res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');
 if(production)res.setHeader('Strict-Transport-Security','max-age=31536000');
 try{
@@ -340,6 +341,8 @@ if(req.headers.origin!==origin||req.headers['sec-fetch-site']==='cross-site')ret
 if(req.method==='POST'||path.startsWith('/api/admin/'))expire();
 if(path==='/api/raffle'&&req.method==='GET'){const wanted=new URL(req.url,'http://localhost').searchParams.get('id'),raffles=activeRaffles(),raffle=(wanted&&activeRaffle(wanted))||activeRaffle();if(!raffle)return send(res,200,{raffles,raffle:null,open:false,message:closedMessage(null),taken:''});return send(res,200,{raffles,raffle,open:salesOpen(raffle),message:salesOpen(raffle)?null:closedMessage(raffle),holdHours:holdMs()/3600000,taken:takenBitmap(raffle)});}
 if(path==='/api/payment-info'&&req.method==='GET')return send(res,200,paymentInfo());
+// Public settings for the site script: the Meta Pixel id saved in Panel → Ajustes → Publicidad (null when there is none).
+if(path==='/api/site-config'&&req.method==='GET')return send(res,200,{pixel:metaPixelId()});
 const publicPhoto=path.match(/^\/api\/raffles\/([a-f0-9]{24})\/photo$/);
 if(publicPhoto&&['GET','HEAD'].includes(req.method)){const row=db.prepare("SELECT photo,photo_type FROM raffles WHERE id=? AND status IN ('active','closed')").get(publicPhoto[1]);if(!row?.photo)return send(res,404,{error:'Foto no disponible'});const photo=Buffer.from(row.photo);return sendCached(req,res,photo,etagOf(photo),row.photo_type,0);}
 if(path==='/api/payments/submit'&&req.method==='POST'){
@@ -359,7 +362,7 @@ try{db.prepare('INSERT INTO payment_submissions(id,reservation,tracking,receipt,
 // Keep the tickets held while the receipt waits for review.
 db.prepare('UPDATE reservations SET expires=MAX(expires,?) WHERE id=?').run(now+REVIEW_HOLD,row.id);db.exec('COMMIT');}
 catch(error){db.exec('ROLLBACK');if(String(error.code).includes('CONSTRAINT')||String(error.message).includes('UNIQUE'))return send(res,409,{error:'No se pudo registrar: ya hay un comprobante en revisión para este teléfono o la referencia ya fue utilizada.'});throw error;}
-return send(res,201,{id,status:'pending',message:'¡Comprobante recibido! Tus boletos quedan apartados mientras revisamos tu pago. Consulta el estado en «Mis boletos» con tu teléfono.'});
+return send(res,201,{id,status:'pending',amount_cents:row.amount_cents,message:'¡Comprobante recibido! Tus boletos quedan apartados mientras revisamos tu pago. Consulta el estado en «Mis boletos» con tu teléfono.'});
 }
 if(path==='/api/tickets/random'&&req.method==='POST'){
 limits(req,'random_tickets',1200,60);const b=await body(req);
@@ -416,6 +419,9 @@ res.setHeader('Set-Cookie',[cookie(sessionToken,3600),`${OWNER_COOKIE}=1; HttpOn
 if(path.startsWith('/api/admin/')){
 if(!admin(req))return send(res,401,{error:'Inicia sesión'});
 if(path==='/api/admin/password'&&req.method==='POST'){limit('change_password',5,900000);const b=await body(req);if(!credentials.verify(b.currentPassword))return send(res,401,{error:'La contraseña actual no coincide.'});if(typeof b.newPassword!=='string'||b.newPassword.length<5||b.newPassword.length>200)return send(res,400,{error:'La contraseña debe tener entre 5 y 200 caracteres.'});credentials.save(b.newPassword);const current=token(req);for(const key of sessions.keys())if(key!==current)sessions.delete(key);audit('password_changed');return send(res,200,{ok:true});}
+if(path==='/api/admin/pixel'&&req.method==='GET')return send(res,200,{id:metaPixelId()});
+if(path==='/api/admin/pixel'&&req.method==='POST'){const b=await body(req);const id=typeof b.id==='string'?b.id.replace(/\D/g,''):'';if(id&&!/^\d{10,20}$/.test(id))return send(res,400,{error:'El ID del píxel son de 10 a 20 números. Lo copias del Administrador de eventos de Meta.'});
+if(id)db.prepare("INSERT INTO settings VALUES('meta_pixel',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(id);else db.prepare("DELETE FROM settings WHERE key='meta_pixel'").run();audit(id?'meta_pixel_saved':'meta_pixel_removed');return send(res,200,{id:id||null});}
 if(path==='/api/admin/auto-reply'&&req.method==='GET'){const config=autoReplyConfig(),sent=db.prepare("SELECT COUNT(*) AS n FROM audit WHERE event='whatsapp_auto_reply' AND created>=?").get(Date.now()-7*86400000).n;const followWeek=db.prepare("SELECT COUNT(*) AS n FROM audit WHERE event='whatsapp_follow_up' AND created>=?").get(Date.now()-7*86400000).n;return send(res,200,{...config,whatsapp:Boolean(process.env.WAHA_URL&&adminGroup&&webhookSecret),sentWeek:sent,followWeek});}
 if(path==='/api/admin/auto-reply'&&req.method==='POST'){const b=await body(req);const text=typeof b.text==='string'?b.text.replace(/\r\n/g,'\n').trim():'',keywords=typeof b.keywords==='string'?b.keywords.trim():'';
 if(text.length<20||text.length>3000)return send(res,400,{error:'El mensaje debe tener entre 20 y 3,000 caracteres.'});if(!keywords.split(',').map(plainText).filter(Boolean).length||keywords.length>300)return send(res,400,{error:'Escribe al menos una palabra clave (separadas por comas).'});
@@ -513,7 +519,7 @@ audit(keep.length?'tickets_released':'reservation_cancelled',r.id);db.exec('COMM
 if(path==='/api/admin/reservations'&&req.method==='GET')return send(res,200,db.prepare("SELECT r.*,f.prize,f.ticket_count,EXISTS(SELECT 1 FROM payment_submissions p WHERE p.reservation=r.id AND p.status='pending') AS payment_review FROM reservations r LEFT JOIN raffles f ON f.id=r.raffle ORDER BY r.created DESC LIMIT 500").all());
 if(path==='/api/admin/confirm'&&req.method==='POST')return send(res,410,{error:'Revisa el comprobante y registra el motivo desde Pagos por revisar.'});
 }
-const files={'/':'index.html','/CFAD':'admin.html','/CFAD/':'admin.html','/app.js':'app.js','/theme.js':'theme.js','/admin.js':'admin.js','/style.css':'style.css','/admin.css':'admin.css','/logo.png':'logo.png','/logo-small.png':'logo-small.png','/favicon.ico':'favicon.ico','/favicon-32.png':'favicon-32.png','/favicon-192.png':'favicon-192.png','/apple-touch-icon.png':'apple-touch-icon.png',
+const files={'/':'index.html','/CFAD':'admin.html','/CFAD/':'admin.html','/app.js':'app.js','/theme.js':'theme.js','/pixel.js':'pixel.js','/admin.js':'admin.js','/style.css':'style.css','/admin.css':'admin.css','/logo.png':'logo.png','/logo-small.png':'logo-small.png','/favicon.ico':'favicon.ico','/favicon-32.png':'favicon-32.png','/favicon-192.png':'favicon-192.png','/apple-touch-icon.png':'apple-touch-icon.png',
 // Self-hosted fonts (Anton for titles and numbers, Poppins for text): no third-party requests and the CSP stays 'self'.
 '/fonts/anton-400.woff2':'fonts/anton-400.woff2','/fonts/poppins-400.woff2':'fonts/poppins-400.woff2','/fonts/poppins-600.woff2':'fonts/poppins-600.woff2','/fonts/poppins-700.woff2':'fonts/poppins-700.woff2'};
 if(req.method==='GET'&&path==='/'){try{countVisit(req);}catch(error){console.error('visit_count_failed',error.message);}}
